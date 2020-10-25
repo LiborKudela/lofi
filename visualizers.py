@@ -7,7 +7,7 @@ class default_visual_callback:
         self.API = API
         self.refresh_data = self.initialize_window
         self.refresh_attempt_counter = 0
-        self.skip = 50
+        self.skip = 10
         self.save = False
 
     def initialize_window(self):  

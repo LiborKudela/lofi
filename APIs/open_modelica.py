@@ -88,7 +88,7 @@ class open_modelica():
     def __init__(self, file, model,
                  force_recompilation=False,
                  abort_slow=0,
-                 fast_storage=None,
+                 fast_storage="/dev/shm/" if os.path.isdir("/dev/shm") else None,
                  visual_callback=default_visual_callback):
 
         # resolve file paths
@@ -190,7 +190,7 @@ class open_modelica():
             script_file = self.compiled_file + ".mos"
             with open(script_file, "w") as OMC_script:
                 OMC_script.write(script_content)
-            print(f"JIT Recompiling... ")
+            print(f"Compiling OpenModelica model... ")
             command = "omc " + script_file
             os.system(command)
             self.write_new_hash()

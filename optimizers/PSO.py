@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 class options():
     def __init__(self):
-        self.n = cluster.size - 1    # populations size
+        self.n = 40                  # populations size
         self.init_w = 0.7            # initial inertia weight
         self.init_c1 = 2.0           # initial social weight
         self.init_c2 = 2.0           # initial cognitive weight

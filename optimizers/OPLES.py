@@ -5,10 +5,10 @@ import matplotlib.pyplot as plt
 
 class options():
     def __init__(self):
-        self.n = 10                  # populations size
-        self.sigma_init = 0.5e-1     # initial sigma
+        self.n = 40                  # populations size
         self.max_sigma = 1e-1        # max sampling deviation
         self.min_sigma = 1e-8        # min sampling deviation
+        self.sigma_init = 1e-2       # initial sigma
         self.success_rule = 0.11     # this seems to work
         self.max_iter = 0            # maximum number of iterations
         self.max_error = -np.inf     # maximum allowed error
@@ -17,11 +17,11 @@ class options():
         self.sparsity_weight = 1.0   # weight to penalize density of program
         self.active_callback = True  # activates reports to terminal
 
-class OPL_ES():
+class OPLES():
     def __init__(self, M=None):
         self.options = options()
         self.callback = callback
-        self.name = "RM(1+λ)-ES"
+        self.name = "OPLES"
         if M is not None:
             self.connect_model(M)
             self.restart()
@@ -149,7 +149,7 @@ class OPL_ES():
 
 def callback(S):
     if cluster.global_rank == 0:
-        str = f"""
+        text = f"""
 +===========================================+
 Algorithm: {S.name}
 Model    : {S.M.model}
@@ -175,4 +175,4 @@ Model    : {S.M.model}
 |Loss drop rate        |{S.Ldrop_rate:15.4f} | - |
 +======================+================+===+
 """
-        print(str)
+        print(text, end = "\n" if S.terminate else "\033[F"*text.count("\n"))

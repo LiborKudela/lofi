@@ -22,7 +22,7 @@ def imode(globals):
         try:
             exec(request, globals)
         except Exception as err:
-            if global_rank == 0:
+            if cluster.global_rank == 0:
                 description = 'source string'
                 error_class = err.__class__.__name__
                 detail = err.args[0]
