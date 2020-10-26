@@ -1,5 +1,5 @@
 import matplotlib.pyplot as plt
-import cluster
+from ..cluster import cluster
 
 class default_visual_callback:
     def __init__(self, API):      

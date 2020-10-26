@@ -1,11 +1,10 @@
-import LOFI
+import lofi
 
-API = LOFI.APIs.open_modelica
-model = API('SDEWES_examples/AdvectionScheme.mo',
-            'AdvectionScheme', fast_storage='/dev/shm')
+API = lofi.APIs.open_modelica
+model = API('AdvectionScheme.mo','AdvectionScheme')
 
 model.visual_callback.skip = 25
-opt = LOFI.optimizers.GRAPSO(model)
+opt = lofi.optimizers.GRAPSO(model)
 opt.train(200)
 
-LOFI.cluster.enter_imode(globals())
+lofi.cluster.imode(globals())

@@ -1,7 +1,7 @@
-import cluster
-import APIs
-import initialisers
-import optimizers
+from .cluster import cluster
+from . import APIs
+from . import optimizers
+from .visualizers import visualizers
 
 # INTERACTIVITY
 prompt = "LOFI >>> "

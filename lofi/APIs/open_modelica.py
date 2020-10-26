@@ -1,12 +1,12 @@
 import xml.etree.ElementTree as ET
 from re import compile as rc
-import cluster
+from ..cluster import cluster
 from hashlib import md5
 import numpy as np
 import os
 from subprocess import call, PIPE
 from DyMat import DyMatFile
-from visualizers import default_visual_callback
+from ..visualizers.visualizers import default_visual_callback
 
 class xml_init_file_handler():
     def __init__(self, init_file):

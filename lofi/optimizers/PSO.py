@@ -1,15 +1,14 @@
 import numpy as np
-import cluster
+from ..cluster import cluster
 import time
 import matplotlib.pyplot as plt
 
 class options():
     def __init__(self):
         self.n = 40                  # populations size
-        self.max_sigma = 1e-1        # max sampling deviation
-        self.min_sigma = 1e-8        # min sampling deviation
-        self.sigma_init = 1e-2       # initial sigma
-        self.success_rule = 0.11     # this seems to work
+        self.init_w = 0.7            # initial inertia weight
+        self.init_c1 = 2.0           # initial social weight
+        self.init_c2 = 2.0           # initial cognitive weight
         self.max_iter = 0            # maximum number of iterations
         self.max_error = -np.inf     # maximum allowed error
         self.limit_space = True      # optional coordinate bound control
@@ -17,17 +16,17 @@ class options():
         self.sparsity_weight = 1.0   # weight to penalize density of program
         self.active_callback = True  # activates reports to terminal
 
-class OPLES():
+class PSO():
     def __init__(self, M=None):
         self.options = options()
         self.callback = callback
-        self.name = "OPLES"
+        self.name = "PSO"
         if M is not None:
             self.connect_model(M)
             self.restart()
 
     def connect_model(self, M):
-        self.M = M  # reference to a model instance
+        self.M = M  # reference to model instance
 
     def disconnect_model(self):
         self.M = None
@@ -39,24 +38,28 @@ class OPLES():
         self.options.max_iter = 0
 
         if cluster.global_rank == 0:
-            self.sigma = self.options.sigma_init  # initial sampling deviance
-            self.success_rate = 0
-            self.Ldrop_rate = 0                   # loss decrease rate
-            self.C_rate = 0                       # convergence rate
-            self.iter = 0                         # iteration counter
-            self.velocity = np.zeros(self.M.m)    # parental velocity
-            self.velocity_norm = 0                # parental velocity norm
+            self.w = self.options.init_w    # initial inertial weight
+            self.c1 = self.options.init_c1  # initial cognitive weight
+            self.c2 = self.options.init_c2  # initial social weight
+            self.iter = 0                   # iteration counter
+
+            # initialize populations
+            self.p = np.random.uniform(self.M.p_lb, self.M.p_ub, (self.options.n, self.M.m))  # particle positions
+            self.v = np.zeros((self.options.n, self.M.m))        # particle velocities
+            self.pbest_p = np.zeros((self.options.n, self.M.m))  # personal best positions
+            self.y = np.full(self.options.n, np.inf)           # particle values
+            self.pbest_y = np.full(self.options.n, np.inf)     # particle personal best values
         else:
             self.p = None  # this is necessary for cluster.map call
 
     def extract_results(self, r):
         if cluster.global_rank == 0:
-            # make r into an array so each value type corresponds to a single row
-            # r[0,:] losses, r[1,:] densities, r[2,:] return codes, r[3,:] sim times
+            # mutate r into an array so each value type corresponds to a single row
+            # r[0,:]=losses, r[1,:]=densities, r[2,:]=return codes, r[3,:]=sim. elapsed times
             r = np.array(r).transpose()
 
-            # read results by type (which is by rows)
-            self.y = r[0,:]
+            # read results by type (rows)
+            self.y[:] = r[0,:]
             if self.options.sparse_program:
                 self.y += r[1,:]
             self.failed = np.count_nonzero(r[2,:])
@@ -64,55 +67,47 @@ class OPLES():
             self.mean_sim_cpu_time = np.sum(r[3,:])/self.options.n
             self.result_owner = r[4,:]
 
+    def update_pbest(self):
+        if cluster.global_rank == 0:
+            better = np.where(self.y < self.pbest_y)[0]
+            self.improved = better.size
+            self.pbest_y[better] = self.y[better]
+            self.pbest_p[better, :] = self.p[better, :]
+
     def update_gbest(self):
         if cluster.global_rank == 0:
-            self.idx = np.nanargmin(self.y)
-            self.prev_gbest_y = self.M.y
-            self.prev_gbest_p = np.copy(self.M.p)
-
-            if self.M.y >= self.y[self.idx]:
-                self.M.y = self.y[self.idx]
-                self.M.p[:] = self.p[self.idx, :]
+            best_idx = np.nanargmin(self.pbest_y)
+            if self.M.y > self.pbest_y[best_idx]:
+                self.M.y = self.pbest_y[best_idx]
+                self.M.p[:] = self.p[best_idx,:]
                 self.M.save_parameters()
-                self.M.result_owner = self.result_owner[self.idx]
-                self.M.result_id = self.idx + 1
+                self.M.result_owner = self.result_owner[best_idx]
+                self.M.result_id = best_idx + 1
                 self.M.result_pulled = False
         self.M.result_pulled = cluster.broadcast(self.M.result_pulled, object_name="res_pull_status")
         if self.M.visual_callback is not None and not self.M.result_pulled:
             self.M.visual_callback()
 
-    def update_sigma(self):
+    def update_particle_positions(self):
         if cluster.global_rank == 0:
-            self.success_rate = 0.8*self.success_rate + 0.2*np.count_nonzero(self.y <= self.prev_gbest_y)/self.options.n
-            self.velocity[:] = 0.9*self.velocity + 0.1*(self.M.p-self.prev_gbest_p)
-            self.velocity_norm = np.linalg.norm(self.velocity)
-            if self.velocity_norm > 1e-7:
-                self.velocity[:] = 0.9*self.velocity + 0.1*(self.M.p-self.prev_gbest_p)
-            else:
-                self.velocity[:] = self.M.p-self.prev_gbest_p
-            self.velocity_norm = np.linalg.norm(self.velocity)
-            self.sigma = 0.9*self.sigma + 0.1*self.sigma*np.exp(self.success_rate - self.options.success_rule)
-            self.sigma = np.clip(self.sigma, self.options.min_sigma, self.options.max_sigma)
-            self.C_rate = 0.9*self.C_rate + 0.1*(1-self.M.y/self.prev_gbest_y)
-            if self.C_rate < 1e-7 and self.sigma == self.options.min_sigma:
-                self.sigma = 10000*self.sigma
-            self.Ldrop_rate = min(self.M.y, 0.9*self.Ldrop_rate + 0.1*(self.prev_gbest_y - self.M.y))
-
-    def generate_new_samples(self):
-        if cluster.global_rank == 0:
-            self.z = np.random.normal(0, 1, (self.options.n, self.M.m))
-            self.p = self.M.p + self.sigma*self.z + self.velocity
-            if self.velocity_norm > 1e-7:
-                self.p[0] = self.M.p + 0.9*self.velocity
-                self.p[1] = self.M.p + 1.1*self.velocity
+            r1 = np.random.random(self.options.n)[:,None]
+            r2 = np.random.random(self.options.n)[:,None]
+            self.v *= self.w
+            self.v += self.c1*r1*(self.pbest_p - self.p)
+            self.v += self.c2*r2*(self.M.p - self.p)
+            self.p += self.v
 
     def enforce_bounds_on_samples(self):
-        if cluster.global_rank == 0 and self.options.limit_space:
-            np.clip(self.p, self.M.p_lb, self.M.p_ub, out=self.p)
+        if cluster.global_rank == 0:
+            if self.options.limit_space:
+                np.clip(self.p, self.M.p_lb, self.M.p_ub, out=self.p)
 
     def update_iteration_counter(self):
         if cluster.global_rank == 0:
             self.iter += 1
+
+    def adapt_swarm_weights(self):
+        pass
 
     def update_termination(self):
         if cluster.global_rank == 0:
@@ -120,15 +115,16 @@ class OPLES():
                                   self.M.y <= self.options.max_error])
 
         # broadcast to all workers
-        self.terminate = cluster.broadcast(self.terminate, object_name="terminate")
+        self.terminate = cluster.broadcast(self.terminate, object_name="termination")
 
     def next_epoch(self):
         epoch_timer = cluster.timer()
-        self.generate_new_samples()
-        self.enforce_bounds_on_samples()
         self.extract_results(cluster.map(self.M.loss, self.p))
+        self.update_pbest()
         self.update_gbest()
-        self.update_sigma()
+        self.update_particle_positions()
+        self.enforce_bounds_on_samples()
+        self.adapt_swarm_weights()
         self.update_iteration_counter()
         self.update_termination()
         self.epoch_time = epoch_timer.get_elapsed()
@@ -136,7 +132,7 @@ class OPLES():
         if self.options.active_callback:
             self.callback(self)
 
-    def train(self, max_iter=None):
+    def train(self, max_iter=100):
         if cluster.global_rank == 0:
             if max_iter is not None:
                 self.options.max_iter += max_iter
@@ -149,11 +145,13 @@ class OPLES():
 
 def callback(S):
     if cluster.global_rank == 0:
-        text = f"""
+        print(f"""
 +===========================================+
 Algorithm: {S.name}
 Model    : {S.M.model}
-+======================+================+===+
++===========================================+
+|W = {S.w:8.6f} |C1 = {S.c1:8.6f} |C2 = {S.c2:8.6f} |
++----------------------+----------------+---+
 |Epoch number          |{S.iter:15d} | - |
 +----------------------+----------------+---+
 |Model loss            |{S.M.y:15.6f} | - |
@@ -164,15 +162,10 @@ Model    : {S.M.model}
 +----------------------+----------------+---+
 |Mean simulation time  |{S.mean_sim_cpu_time:15.4f} | s |
 +----------------------+----------------+---+
-|Sampling deviation    |{S.sigma:15.10f} | - |
+|Succesfull            |{S.survived:15d} | - |
 +----------------------+----------------+---+
-|Parental velocity     |{S.velocity_norm:15.10f} | - |
+|Failed                |{S.failed:15d} | - |
 +----------------------+----------------+---+
-|Success rate          |{100*S.success_rate:8.4f}/{100*S.options.success_rule:5.3f} | % |
-+----------------------+----------------+---+
-|Convergence rate      |{100*S.C_rate:15.4f} | % |
-+----------------------+----------------+---+
-|Loss drop rate        |{S.Ldrop_rate:15.4f} | - |
+|Improved              |{S.improved:15d} | - |
 +======================+================+===+
-"""
-        print(text, end = "\n" if S.terminate else "\033[F"*text.count("\n"))
+""")
