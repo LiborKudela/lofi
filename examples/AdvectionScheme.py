@@ -7,4 +7,4 @@ model.visual_callback.skip = 25
 opt = lofi.optimizers.GRAPSO(model)
 opt.train(200)
 
-lofi.cluster.imode(globals())
+lofi.imode(globals())

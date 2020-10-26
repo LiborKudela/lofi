@@ -85,14 +85,15 @@ class xml_init_file_handler():
 
 
 class open_modelica():
-    def __init__(self, file, model,
+    def __init__(self, files, model,
                  force_recompilation=False,
                  abort_slow=0,
                  fast_storage="/dev/shm/" if os.path.isdir("/dev/shm") else None,
                  visual_callback=default_visual_callback):
 
         # resolve file paths
-        self.file = os.path.abspath(file)
+        files = [files] if type(files) is not list else files
+        self.files = [os.path.abspath(file) for file in files]
         self.model = model
         if fast_storage is not None:
             prefix = fast_storage
@@ -143,12 +144,13 @@ class open_modelica():
             self.visual_callback = visual_callback(self)
 
     def hash(self):
-        """Calculates md5 hash of the model .mo file"""
+        """Calculates md5 hash of the model .mo files"""
         hash_md5 = md5()
-        with open(self.file, "rb") as f:
-            for chunk in iter(lambda: f.read(4096), b""):
-                hash_md5.update(chunk)
-            return hash_md5.hexdigest()
+        for file in self.files:
+            with open(file, "rb") as f:
+                for chunk in iter(lambda: f.read(4096), b""):
+                    hash_md5.update(chunk)
+        return hash_md5.hexdigest()
 
     def write_new_hash(self):
         """Writes the hash of the .mo file to disk"""
@@ -182,11 +184,12 @@ class open_modelica():
             script_content += "getErrorString();\n"
             script_content += "loadModel(Modelica);\n"
             script_content += "getErrorString();\n"
-            script_content += f"loadFile(\"{self.file}\");\n"
-            script_content += "getErrorString();\n"
+            for file in self.files:
+                script_content += f"loadFile(\"{file}\");\n"
+                script_content += "getErrorString();\n"
             script_content += f"buildModel({self.model});\n"
             script_content += "getErrorString();\n"
-            script_content += "//coment\n"
+            script_content += "//comment\n"
             script_file = self.compiled_file + ".mos"
             with open(script_file, "w") as OMC_script:
                 OMC_script.write(script_content)
