@@ -2,7 +2,7 @@
 
 **Lofi is a simple derivative free, distributed (MPI) optimization toolset for black-box (or non-differentiable) models.**
 
-**Instalation instruction using pip (Lixux)**
+**Instalation instruction using pip (Lixux)**  
 python3 -m pip install git+https://github.com/LiborKudela/lofi.git
 
 
