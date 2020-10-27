@@ -135,7 +135,7 @@ class open_modelica():
             self.y = self.loss(self.p, result_tag_override=0)[0]
         self.result_owner = None
         self.result_id = None
-        self.result_pulled = False
+        self.result_pulled = True
 
         # resolve visual callback reference/validity
         if visual_callback is None:
