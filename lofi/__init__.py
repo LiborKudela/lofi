@@ -26,12 +26,7 @@ def imode(globals):
                 description = 'source string'
                 error_class = err.__class__.__name__
                 detail = err.args[0]
-                cl, exc, tb = sys.exc_info()
-                print("%s at line %d of %s: %s" % (error_class,
-                                                   line_number,
-                                                   description,
-                                                   detail))
-
+                print(detail)
 # using build in python interactive mode (python3 -i script.py)
 if cluster.global_rank == 0:
     cluster.sys.ps1 = prompt
