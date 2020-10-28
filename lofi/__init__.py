@@ -2,33 +2,35 @@ from .cluster import cluster
 from . import APIs
 from . import optimizers
 from .visualizers import visualizers
+from time import sleep
 
-# INTERACTIVITY
-prompt = "LOFI >>> "
-
-# custom LOFI way - blocking! but Xforwarding works over ssh -Y
+# lofi has interactive mode that can be call using lofi.imode(globals())
 def imode(globals):
     if cluster.global_rank == 0:
-        import traceback
         print("Entering interactive mode...")
     while True:
+
+        # get command on master node console
         cluster.comm.barrier()
         if cluster.global_rank == 0:
-            request = input(prompt)
+            command = input("lofi imode >>>")
         else:
-            request = None
+            command = None
 
-        request = cluster.broadcast(request)
+        # wait for command in non-blocking way
+        req = cluster.comm.Ibarrier()
+        while not req.test()[0]:
+            sleep(0.01)
+        req.wait()
+        command = cluster.broadcast(command)
+
+        # execute the command on every node
         try:
-            exec(request, globals)
+            if command == "imode.leave()":
+                break
+            else:
+                exec(command, globals)
         except Exception as err:
             if cluster.global_rank == 0:
-                description = 'source string'
-                error_class = err.__class__.__name__
                 detail = err.args[0]
                 print(detail)
-# using build in python interactive mode (python3 -i script.py)
-if cluster.global_rank == 0:
-    cluster.sys.ps1 = prompt
-else:
-    cluster.sys.ps1 = ""
