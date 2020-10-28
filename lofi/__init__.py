@@ -5,6 +5,7 @@ from .visualizers import visualizers
 from time import sleep
 
 # lofi has interactive mode that can be call using lofi.imode(globals())
+# this also allows X-forwarding when main node is a remote machine
 def imode(globals):
     if cluster.global_rank == 0:
         print("Entering interactive mode...")
