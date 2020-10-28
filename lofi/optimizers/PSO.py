@@ -145,7 +145,7 @@ class PSO():
 
 def callback(S):
     if cluster.global_rank == 0:
-        print(f"""
+        text = f"""
 +===========================================+
 Algorithm: {S.name}
 Model    : {S.M.model}
@@ -168,4 +168,5 @@ Model    : {S.M.model}
 +----------------------+----------------+---+
 |Improved              |{S.improved:15d} | - |
 +======================+================+===+
-""")
+"""
+        print(text, end = "\n" if S.terminate else "\033[F"*text.count("\n"))
