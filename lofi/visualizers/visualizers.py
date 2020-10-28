@@ -32,13 +32,16 @@ class default_visual_callback:
     def update_existing_window(self):
         res = self.API.get_result()
         if cluster.global_rank == 0:
-            for i, name in enumerate(self.API.plot_vars):
-                ydata = res.getVarArray([name],withAbscissa=False)
-                self.line[i].set_ydata(ydata)
-            self.ax.relim()
-            self.ax.autoscale_view(True, True, True)
-            self.fig.canvas.draw()
-            self.fig.canvas.flush_events()
+            try:
+                for i, name in enumerate(self.API.plot_vars):
+                    ydata = res.getVarArray([name],withAbscissa=False)
+                    self.line[i].set_ydata(ydata)
+                self.ax.relim()
+                self.ax.autoscale_view(True, True, True)
+                self.fig.canvas.draw()
+                self.fig.canvas.flush_events()
+            except:
+                print("Visualizer update failed")
     
     def __call__(self):
         if self.refresh_attempt_counter % self.skip == 0:
