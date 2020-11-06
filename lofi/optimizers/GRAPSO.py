@@ -9,7 +9,7 @@ class GRAPSO(PSO):
     def adapt_swarm_weights(self):
         # update swarm weights
         if np.random.random() > 0.5:
-            self.w = 0.4 + 0.5*np.random.random()
+            self.w = 0.3 + 0.6*np.random.random()
         if np.random.random() > 0.5:
             self.c1 = 1.5 + np.random.random()
         if np.random.random() > 0.5:

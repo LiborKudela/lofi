@@ -152,7 +152,7 @@ class open_modelica():
                     hash_md5.update(chunk)
         return hash_md5.hexdigest()
 
-    def write_new_hash(self):
+    def write_hash(self):
         """Writes the hash of the .mo file to disk"""
         if cluster.global_rank == 0:
             with open(self.compiled_file + "_hash.txt", "w") as f:
@@ -165,7 +165,7 @@ class open_modelica():
                 return f.read()
 
     def model_changed(self):
-        """Compares old and new hash of the .mo file. Returns True or False"""
+        """Compares old and new hash of the .mo files. Returns True if they changed"""
         return not os.path.exists(self.compile_dir) or not self.read_hash() == self.hash()
 
     def make_dir(self, dir):
@@ -196,7 +196,7 @@ class open_modelica():
             print(f"Compiling OpenModelica model... ")
             command = "omc " + script_file
             os.system(command)
-            self.write_new_hash()
+            self.write_hash()
 
     def get_simulation_command_root(self):
         """Construct the basic flags/options for the model executable"""
@@ -224,38 +224,6 @@ class open_modelica():
             flag += f"{self.p_names[i]}={p[i]},"
         return flag
 
-    def loss(self, prms, result_tag_override=None):
-        """Executes model with given parameters and returns"""
-
-        timer = cluster.timer()
-
-        # resolve name (tag/id) of the result file
-        if result_tag_override is not None:
-            result_tag = result_tag_override
-        else:
-            result_tag = cluster.status.Get_tag()
-
-        # construct the command and run it in the shell (drops result file)
-        command = self.get_simulation_command_root()
-        command += self.result_file_flag(result_tag)
-        command += self.override_parameters(prms)
-        retcode = call(command, shell=True, stdout=PIPE, stderr=PIPE)
-
-        # if the execution fails return infinite loss
-        if retcode != 0:
-            return np.inf, np.sum(np.abs(prms)), 1, timer.get_elapsed(), cluster.global_rank
-
-        # if the execution is successful, read the corresponding result file
-        result = self.read_result_file(result_tag)
-        y = result.getVarArray(self.y_names, withAbscissa=False)[0:,:]
-
-        # if the results are NOT MEANINGFUL, return infinite loss
-        if np.any(np.isnan(y)) or np.any(np.isinf(y)):
-            return np.inf, np.sum(np.abs(prms)), 1, timer.get_elapsed(), cluster.global_rank
-
-        # if the results are *MEANINGFUL* return the result data
-        return np.sum(y), np.sum(np.abs(prms)), 0, timer.get_elapsed(), cluster.global_rank
-
     def get_formatted_parameters(self):
         """Returns string of best known parameters in OM override_file format"""
 
@@ -273,6 +241,75 @@ class open_modelica():
         if cluster.global_rank == 0:
             with open(self.model + "_solution.txt", "w") as f:
                 f.write(self.get_formatted_parameters())
+
+    def print_parameters(self):
+        """Prints the best known parameters in OM override_file format"""
+
+        # only master node prints ianswer to the console
+        if cluster.global_rank == 0:
+            print(self.get_formatted_parameters())
+
+    def call_simulation(self, prms, result_tag):
+        command = self.get_simulation_command_root()
+        command += self.result_file_flag(result_tag)
+        command += self.override_parameters(prms)
+        return call(command, shell=True, stdout=PIPE, stderr=PIPE)
+
+    def extract_raw_loss(self, result):
+        return result.getVarArray(self.y_names, withAbscissa=False)[0:,:]
+
+    def get_formated_loss(self, f=np.max):
+        "Returns string of the best known losses"
+        if cluster.global_rank == 0:
+            formated_loss = ""
+            y = self.extract_raw_loss(self.get_result()) 
+            for name, value in zip(self.y_names, f(y, axis=0)):
+                formated_loss += f"{name}={value}\n"
+            return formated_loss
+
+    def print_loss(self, f=np.max):
+        if cluster.global_rank == 0:
+            print(self.get_formated_loss(f=f))
+
+    def save_loss(self, f=np.max):
+        # master opens file and writes the content into it
+        if cluster.global_rank == 0:
+            with open(self.model + "_loss.txt", "w") as f:
+                f.write(self.get_formatted_loss(f=f))
+
+
+    def inf_loss(self, prms, timer):
+        return np.inf, np.sum(np.abs(prms)), 1, timer.get_elapsed(), cluster.global_rank
+
+    def real_loss(self, y, prms, timer):
+        return np.sum(y), np.sum(np.abs(prms)), 0, timer.get_elapsed(), cluster.global_rank
+
+    def loss(self, prms, result_tag_override=None):
+        """Executes model with given parameters and returns tuple of sim. data"""
+
+        timer = cluster.timer()
+
+        # resolve name (tag/id) of the result file
+        if result_tag_override is not None:
+            result_tag = result_tag_override
+        else:
+            result_tag = cluster.status.Get_tag()
+
+        retcode = self.call_simulation(prms, result_tag)
+
+        if retcode != 0:
+            return self.inf_loss(prms, timer)
+        else:
+            result = self.read_result_file(result_tag)
+            y = self.extract_raw_loss(result)  # y is a np.array of floats
+
+        if np.any(np.isnan(y)) or np.any(np.isinf(y)):
+            return self.inf_loss(prms, timer)
+        else:
+            return self.real_loss(y, prms, timer)
+
+    def notify_new_improvment(selfi, idx):
+        self.result_pulled = False
 
     def pull_result(self):
         """Updates best known result data on master node by pulling from cluster"""
@@ -304,14 +341,16 @@ class open_modelica():
         # make sure that master has the newest results
         self.pull_result()
 
-        # return new results to whomever called this function
         if cluster.global_rank == 0:
             return self.result
 
-    def print_parameters(self):
-        """Prints the best known parameters in OM override_file format"""
-
-        # only master node prints ianswer to the console
+    def post_gbest_update_actions(self):
+        self.pull_result()
         if cluster.global_rank == 0:
-            print(self.get_formatted_parameters())
+            self.save_parameters()
+            self.save_loss()
+
+
+
+
 

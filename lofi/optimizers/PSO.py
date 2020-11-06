@@ -52,27 +52,27 @@ class PSO():
         else:
             self.p = None  # this is necessary for cluster.map call
 
+    @cluster.on_master
     def extract_results(self, r):
-        if cluster.global_rank == 0:
-            # mutate r into an array so each value type corresponds to a single row
-            # r[0,:]=losses, r[1,:]=densities, r[2,:]=return codes, r[3,:]=sim. elapsed times
-            r = np.array(r).transpose()
+        # mutate r into an array so each value type corresponds to a single row
+        # r[0,:]=losses, r[1,:]=densities, r[2,:]=return codes, r[3,:]=sim. elapsed times
+        r = np.array(r).transpose()
 
-            # read results by type (rows)
-            self.y[:] = r[0,:]
-            if self.options.sparse_program:
-                self.y += r[1,:]
-            self.failed = np.count_nonzero(r[2,:])
-            self.survived = self.options.n - self.failed
-            self.mean_sim_cpu_time = np.sum(r[3,:])/self.options.n
-            self.result_owner = r[4,:]
+        # read results by type (rows)
+        self.y[:] = r[0,:]
+        if self.options.sparse_program:
+            self.y += r[1,:]
+        self.failed = np.count_nonzero(r[2,:])
+        self.survived = self.options.n - self.failed
+        self.mean_sim_cpu_time = np.sum(r[3,:])/self.options.n
+        self.result_owner = r[4,:]
 
+    @cluster.on_master
     def update_pbest(self):
-        if cluster.global_rank == 0:
-            better = np.where(self.y < self.pbest_y)[0]
-            self.improved = better.size
-            self.pbest_y[better] = self.y[better]
-            self.pbest_p[better, :] = self.p[better, :]
+        better = np.where(self.y < self.pbest_y)[0]
+        self.improved = better.size
+        self.pbest_y[better] = self.y[better]
+        self.pbest_p[better, :] = self.p[better, :]
 
     def update_gbest(self):
         if cluster.global_rank == 0:
@@ -82,40 +82,45 @@ class PSO():
                 self.M.p[:] = self.p[best_idx,:]
                 self.M.save_parameters()
                 self.M.result_owner = self.result_owner[best_idx]
-                self.M.result_id = best_idx + 1
+                self.M.result_id = best_idx + 1  # (rank=0) does not simulate 
                 self.M.result_pulled = False
         self.M.result_pulled = cluster.broadcast(self.M.result_pulled, object_name="res_pull_status")
         if self.M.visual_callback is not None and not self.M.result_pulled:
             self.M.visual_callback()
 
+    @cluster.on_master
     def update_particle_positions(self):
-        if cluster.global_rank == 0:
-            r1 = np.random.random(self.options.n)[:,None]
-            r2 = np.random.random(self.options.n)[:,None]
-            self.v *= self.w
-            self.v += self.c1*r1*(self.pbest_p - self.p)
-            self.v += self.c2*r2*(self.M.p - self.p)
-            self.p += self.v
+        r1 = np.random.random(self.options.n)[:,None]
+        r2 = np.random.random(self.options.n)[:,None]
+        self.v *= self.w
+        self.v += self.c1*r1*(self.pbest_p - self.p)
+        self.v += self.c2*r2*(self.M.p - self.p)
+        self.p += self.v
 
+    @cluster.on_master
     def enforce_bounds_on_samples(self):
-        if cluster.global_rank == 0:
-            if self.options.limit_space:
-                np.clip(self.p, self.M.p_lb, self.M.p_ub, out=self.p)
+        if self.options.limit_space:
+            np.clip(self.p, self.M.p_lb, self.M.p_ub, out=self.p)
 
+    @cluster.on_master
     def update_iteration_counter(self):
-        if cluster.global_rank == 0:
-            self.iter += 1
+        self.iter += 1
 
     def adapt_swarm_weights(self):
         pass
 
-    def update_termination(self):
-        if cluster.global_rank == 0:
-            self.terminate = any([self.iter >= self.options.max_iter,
-                                  self.M.y <= self.options.max_error])
+    @cluster.on_master
+    def check_termination(self):
+        self.terminate = any([
+            self.iter >= self.options.max_iter,
+            self.M.y <= self.options.max_error])
 
-        # broadcast to all workers
+    def broadcast_termination(self):
         self.terminate = cluster.broadcast(self.terminate, object_name="termination")
+
+    def update_termination(self):
+        self.check_termination()
+        self.broadcast_termination()
 
     def next_epoch(self):
         epoch_timer = cluster.timer()
@@ -126,7 +131,8 @@ class PSO():
         self.enforce_bounds_on_samples()
         self.adapt_swarm_weights()
         self.update_iteration_counter()
-        self.update_termination()
+        self.check_termination()
+        self.broadcast_termination()
         self.epoch_time = epoch_timer.get_elapsed()
         self.total_time += self.epoch_time
         if self.options.active_callback:

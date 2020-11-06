@@ -62,9 +62,11 @@ class timer():
         self.last_lap = t
         return time.time() - self.last_lap
 
-def on_master(f,x):
-    if cluster.global_rank == 0:
-        return f(x)
+def on_master(f):
+    def decorated_f(*args, **kwargs):
+        if global_rank == 0:
+            return f(*args, **kwargs)
+    return decorated_f
 
 class queue():
     def __init__(self, data):
