@@ -1,4 +1,7 @@
-# LOFI
+
+<p align="center">
+  <img src="https://github.com/LiborKudela/lofi/blob/master/logo.svg" width="300"/>
+</p>
 
 **Lofi is a simple derivative free, distributed (MPI) optimization toolset for black-box (or non-differentiable) models.**
 
