@@ -319,7 +319,7 @@ class open_modelica():
 
             # Tell every node what is the best result_id and who owns that file
             data = (self.result_id, self.result_owner)
-            self.result_id, self.result_owner = cluster.broadcast(data, object_name="res_pull_ownership")
+            self.result_id, self.result_owner = cluster.broadcast(data)
 
             # If a node is the owner of the wanted file, it reads the data and
             # sends the data to the master node (the zero node)
