@@ -189,16 +189,12 @@ def map(work, data):
     else:
         worker(work)
 
-def broadcast(object, root=0, object_name=""):
+def broadcast(object, root=0):
     """Broadcast by assignment."""
-    if global_rank == root and options.reports_active:
-        print(f"Broadcasting: {object_name} of size: {deep_getsizeof(object, set())} bytes")
     return comm.bcast(object, root=root)
 
-def Broadcast(object, root=0, object_name=""):
+def Broadcast(object, root=0):
     """Broadcast to buffer. e.g. numpy arrays."""
-    if global_rank == root and options.reports_active:
-        print(f"Broadcasting: {object_name} of size: {deep_getsizeof(object, set())} bytes")
     comm.Bcast(object, root=root)
 
 def collect(data, source, dest=0):
