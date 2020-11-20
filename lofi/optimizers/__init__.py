@@ -1,5 +1,5 @@
 # particle swarm family
-from .PSO import PSO          # standard PSO 
+from .PSO import PSO        # standard PSO 
 from .GRAPSO import GRAPSO    # Greedy random adaptation PSO 
 
 # evolution strategies family

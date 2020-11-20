@@ -5,8 +5,9 @@ class GRAPSO(PSO):
         super().__init__(M)
         if cluster.global_rank == 0:
             self.name = "GRAPSO"
-
-    def adapt_swarm_weights(self):
+            
+    @cluster.on_master
+    def adaptation(self):
         # update swarm weights
         if np.random.random() > 0.5:
             self.w = 0.3 + 0.6*np.random.random()
