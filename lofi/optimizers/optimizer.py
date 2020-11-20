@@ -94,8 +94,8 @@ class Optimizer():
         self.check_termination()
         self.terminate = cluster.broadcast(self.terminate)
     
-   @cluster.on_master
-   def generate_new_epoch_data(self):
+    @cluster.on_master
+    def generate_new_epoch_data(self):
         """This method that assigns new self.p etc."""
         pass 
 
