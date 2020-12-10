@@ -16,6 +16,3 @@ python3 -m pip install git+https://github.com/LiborKudela/lofi.git
 * PSO
 * GRAPSO
 * OPLES (An evolutionary strategy with samling space adaptation)
-
-
-**Please cite this work using:**
