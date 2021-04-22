@@ -308,7 +308,7 @@ class open_modelica():
         else:
             return self.real_loss(y, prms, timer)
 
-    def notify_new_improvment(selfi, idx):
+    def notify_new_improvement(self, idx):
         self.result_pulled = False
 
     def pull_result(self):
