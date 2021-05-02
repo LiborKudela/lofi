@@ -88,6 +88,7 @@ class open_modelica():
     def __init__(self, files, model,
                  force_recompilation=False,
                  abort_slow=0,
+                 solver='dassl',
                  fast_storage="/dev/shm/" if os.path.isdir("/dev/shm") else None,
                  visual_callback=default_visual_callback):
 
@@ -109,7 +110,9 @@ class open_modelica():
         if self.model_changed() or self.force_recompilation:
             self.compile()
         self.make_dir(self.result_dir)
+
         self.abort_slow = abort_slow
+        self.solver = solver
         cluster.comm.Barrier()  # synchronize here
 
         # read init_file for information about the compiled model
@@ -202,6 +205,7 @@ class open_modelica():
         """Construct the basic flags/options for the model executable"""
         flags = f" -inputPath={self.compile_dir}"
         flags += " -lv=-LOG_STATS,-stdout,-assert"
+        flags += f" -s={self.solver}"
         if self.abort_slow > 0:
             flags += f" -alarm={self.abort_slow}"
         return self.compiled_file + flags
