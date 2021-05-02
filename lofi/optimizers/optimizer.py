@@ -53,7 +53,7 @@ class Optimizer():
         self.survived = self.options.n - self.failed
         self.mean_sim_cpu_time = np.sum(r[3,:])/self.options.n
         self.result_owner = r[4,:]
-
+        
     @cluster.on_master
     def pre_gbest_update_actions(self):
         """This function is called prior to gbest_update"""
@@ -106,15 +106,18 @@ class Optimizer():
 
     @cluster.on_master
     def update_console_table(self):
-       table = f"""       
-+===========================================+
-Algorithm: {self.name}
-Model    : {self.M.model}
-Loss     : {self.M.y:.6f}
-Epoch    : {self.iter:d}
-+===========================================+
+       tbl = f"""       
+\033[K+===========================================+
+\033[KAlgorithm: {self.name}
+\033[KModel    : {self.M.model}
+\033[KLoss     : {self.M.y:.6f}
+\033[KEpoch    : {self.iter:d}
+\033[KAvg time : {self.mean_sim_cpu_time:.4f}
+\033[KSuccess  : {self.survived:d}
+\033[KFailure  : {self.failed:d}
+\033[K+===========================================+
 """ 
-       print(table, end = "\n" if self.terminate else "\033[F"*table.count("\n"))
+       print(tbl, end = "\n" if self.terminate else "\033[F"*tbl.count("\n"))
 
     def next_epoch(self):
         epoch_timer = cluster.timer()
