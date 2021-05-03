@@ -68,6 +68,12 @@ def on_master(f):
             return f(*args, **kwargs)
     return decorated_f
 
+def on_machine(f):
+    def decorated_f(*args, **kwargs):
+        if local_rank == 0:
+            return f(*args, **kwargs)
+    return decorated_f
+
 class queue():
     def __init__(self, data):
         self.data_items = data

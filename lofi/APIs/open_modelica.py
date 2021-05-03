@@ -104,6 +104,7 @@ class open_modelica():
         self.result_dir = prefix + f"/result_" + self.model
         self.compiled_file = self.compile_dir + f"/{self.model}"
         self.init_file = self.compiled_file + "_init.xml"
+        self.viz_file = prefix + f"lofi_viz_data/{self.model}.h5"
 
         # JIT compile if necessary (or forced)
         self.force_recompilation = force_recompilation
@@ -155,11 +156,11 @@ class open_modelica():
                     hash_md5.update(chunk)
         return hash_md5.hexdigest()
 
+    @cluster.on_master
     def write_hash(self):
         """Writes the hash of the .mo file to disk"""
-        if cluster.global_rank == 0:
-            with open(self.compiled_file + "_hash.txt", "w") as f:
-                f.write(self.hash())
+        with open(self.compiled_file + "_hash.txt", "w") as f:
+            f.write(self.hash())
 
     def read_hash(self):
         """Reads the hash of the .mo file from disk if it exists"""
@@ -171,35 +172,35 @@ class open_modelica():
         """Compares old and new hash of the .mo files. Returns True if they changed"""
         return not os.path.exists(self.compile_dir) or not self.read_hash() == self.hash()
 
+    @cluster.on_master
     def make_dir(self, dir):
         """Creates folder of given name"""
-        if cluster.global_rank == 0:
-            if not os.path.exists(dir):
-                os.mkdir(dir)
-            else:
-                os.system("rm " + dir + "/*")
+        if not os.path.exists(dir):
+            os.mkdir(dir)
+        else:
+            os.system("rm " + dir + "/*")
 
+    @cluster.on_machine
     def compile(self):
         """Compiles the model on each machine with OMC that they have"""
-        if cluster.local_rank == 0:
-            self.make_dir(self.compile_dir)
-            script_content = f"cd(\"{self.compile_dir}\");\n"
+        self.make_dir(self.compile_dir)
+        script_content = f"cd(\"{self.compile_dir}\");\n"
+        script_content += "getErrorString();\n"
+        script_content += "loadModel(Modelica);\n"
+        script_content += "getErrorString();\n"
+        for file in self.files:
+            script_content += f"loadFile(\"{file}\");\n"
             script_content += "getErrorString();\n"
-            script_content += "loadModel(Modelica);\n"
-            script_content += "getErrorString();\n"
-            for file in self.files:
-                script_content += f"loadFile(\"{file}\");\n"
-                script_content += "getErrorString();\n"
-            script_content += f"buildModel({self.model});\n"
-            script_content += "getErrorString();\n"
-            script_content += "//comment\n"
-            script_file = self.compiled_file + ".mos"
-            with open(script_file, "w") as OMC_script:
-                OMC_script.write(script_content)
-            print(f"Compiling OpenModelica model... ")
-            command = "omc " + script_file
-            os.system(command)
-            self.write_hash()
+        script_content += f"buildModel({self.model});\n"
+        script_content += "getErrorString();\n"
+        script_content += "//comment\n"
+        script_file = self.compiled_file + ".mos"
+        with open(script_file, "w") as OMC_script:
+            OMC_script.write(script_content)
+        print(f"Compiling OpenModelica model... ")
+        command = "omc " + script_file
+        os.system(command)
+        self.write_hash()
 
     def get_simulation_command_root(self):
         """Construct the basic flags/options for the model executable"""
@@ -228,30 +229,27 @@ class open_modelica():
             flag += f"{self.p_names[i]}={p[i]},"
         return flag
 
+    @cluster.on_master
     def get_formatted_parameters(self):
         """Returns string of best known parameters in OM override_file format"""
 
-        # master node creates, formats and returns the string
-        if cluster.global_rank == 0:
-            formated_parameters = ""
-            for name, value in zip(self.p_names, self.p):
-                formated_parameters += f"{name}={value}\n"
-            return formated_parameters
+        formated_parameters = ""
+        for name, value in zip(self.p_names, self.p):
+            formated_parameters += f"{name}={value}\n"
+        return formated_parameters
 
+    @cluster.on_master
     def save_parameters(self):
         """Saves the currently best known parameters in OM override_file format"""
 
-        # master opens file and writes the content into it
-        if cluster.global_rank == 0:
-            with open(self.model + "_solution.txt", "w") as f:
-                f.write(self.get_formatted_parameters())
+        with open(self.model + "_solution.txt", "w") as f:
+            f.write(self.get_formatted_parameters())
 
+    @cluster.on_master
     def print_parameters(self):
         """Prints the best known parameters in OM override_file format"""
 
-        # only master node prints ianswer to the console
-        if cluster.global_rank == 0:
-            print(self.get_formatted_parameters())
+        print(self.get_formatted_parameters())
 
     def call_simulation(self, prms, result_tag):
         command = self.get_simulation_command_root()
@@ -262,14 +260,14 @@ class open_modelica():
     def extract_raw_loss(self, result):
         return result.getVarArray(self.y_names, withAbscissa=False)[0:,:]
 
+    @cluster.on_master
     def get_formated_loss(self, f=np.max):
         "Returns string of the best known losses"
-        if cluster.global_rank == 0:
-            formated_loss = ""
-            y = self.extract_raw_loss(self.get_result()) 
-            for name, value in zip(self.y_names, f(y, axis=0)):
-                formated_loss += f"{name}={value}\n"
-            return formated_loss
+        formated_loss = ""
+        y = self.extract_raw_loss(self.get_result()) 
+        for name, value in zip(self.y_names, f(y, axis=0)):
+            formated_loss += f"{name}={value}\n"
+        return formated_loss
 
     def print_loss(self, f=np.max):
         if cluster.global_rank == 0:
@@ -280,7 +278,6 @@ class open_modelica():
         if cluster.global_rank == 0:
             with open(self.model + "_loss.txt", "w") as f:
                 f.write(self.get_formatted_loss(f=f))
-
 
     def inf_loss(self, prms, timer):
         return np.inf, np.sum(np.abs(prms)), 1, timer.get_elapsed(), cluster.global_rank
