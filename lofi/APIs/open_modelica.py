@@ -133,6 +133,9 @@ class open_modelica():
         # get variables to be plotted from withing init_file
         self.plot_vars = self.xml_info.get_plot_variables("name")
 
+        # evaluation counter
+        self.evals = 0
+
         # model state with res_file reference info
         if cluster.global_rank == 0:
             self.p = self.p_start
@@ -289,6 +292,7 @@ class open_modelica():
         """Executes model with given parameters and returns tuple of sim. data"""
 
         timer = cluster.timer()
+        self.evals += 1
 
         # resolve name (tag/id) of the result file
         if result_tag_override is not None:
@@ -308,6 +312,10 @@ class open_modelica():
             return self.inf_loss(prms, timer)
         else:
             return self.real_loss(y, prms, timer)
+
+    def get_total_evals(self):
+        """Returns the number of calls to loss function"""
+        return cluster.sum_all(self.evals)
 
     def notify_new_improvement(self, idx):
         self.result_pulled = False

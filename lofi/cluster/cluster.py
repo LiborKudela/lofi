@@ -211,6 +211,10 @@ def collect(data, source, dest=0):
     elif global_rank == dest:
         return comm.recv(None, source=source, tag=0)
 
+def sum_all(data, dest=0):
+    "Returns sum acumulated across all nodes"
+    return comm.reduce(data, op=MPI.SUM, root=dest)
+
 def deep_getsizeof(o, ids):
     if id(o) in ids:
         return 0
