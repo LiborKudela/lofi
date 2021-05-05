@@ -63,12 +63,13 @@ class Optimizer():
     def update_gbest(self):
         best_idx = np.nanargmin(self.y)
         if self.M.y > self.y[best_idx]:
-            self.M.y = self.y[best_idx]
-            self.M.p[:] = self.p[best_idx,:]
-            self.M.save_parameters()
-            self.M.result_owner = self.result_owner[best_idx]
-            self.M.result_id = best_idx + 1  # (rank=0) does not simulate 
-            self.M.result_pulled = False
+            self.M.update_state(self.p[best_idx,:],
+                                self.y[best_idx],
+                                owner=self.result_owner[best_idx],
+                                res_id=best_idx+1) 
+
+    def update_log(self):
+        self.M.update_log()
     
     @cluster.on_master
     def enforce_bounds_on_samples(self):
@@ -79,11 +80,6 @@ class Optimizer():
     def update_iteration_counter(self):
         self.iter += 1
     
-    def broadcast_result_availability(self):
-        self.M.result_pulled = cluster.broadcast(self.M.result_pulled)
-        if self.M.visual_callback is not None and not self.M.result_pulled:
-            self.M.visual_callback()
-
     @cluster.on_master
     def check_termination(self):
         self.terminate = any([
@@ -112,6 +108,8 @@ class Optimizer():
 \033[KModel    : {self.M.model}
 \033[KLoss     : {self.M.y:.6f}
 \033[KEpoch    : {self.iter:d}
+\033[KEvals    : {self.M.total_evals:d}
+\033[KOpt Time : {self.total_time:.4f}
 \033[KAvg time : {self.mean_sim_cpu_time:.4f}
 \033[KSuccess  : {self.survived:d}
 \033[KFailure  : {self.failed:d}
@@ -126,13 +124,13 @@ class Optimizer():
         self.pre_gbest_update_actions()
         self.update_gbest()
         self.adaptation()
-        self.broadcast_result_availability()
         self.generate_new_epoch_data()
         self.enforce_bounds_on_samples()
         self.update_iteration_counter()
         self.update_termination()
         self.epoch_time = epoch_timer.get_elapsed()
         self.total_time += self.epoch_time
+        self.update_log()
         self.update_console_table()
     
     @cluster.on_master

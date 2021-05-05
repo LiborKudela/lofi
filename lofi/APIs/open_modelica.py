@@ -142,7 +142,7 @@ class open_modelica():
             self.y = self.loss(self.p, result_tag_override=0)[0]
         self.result_owner = None
         self.result_id = None
-        self.result_pulled = True
+        self.new_best_result = False
 
         # resolve visual callback reference/validity
         if visual_callback is None:
@@ -313,18 +313,32 @@ class open_modelica():
         else:
             return self.real_loss(y, prms, timer)
 
+    @cluster.on_master
+    def update_state(self, p, y, owner=None, res_id=None):
+        "This function updates the current best state of the model"
+        self.y = y
+        self.p[:] = p
+        self.save_parameters()
+        self.result_owner = owner
+        self.result_id = res_id 
+        self.new_best_result = True
+
+    def update_log(self):
+        self.total_evals = self.get_total_evals()
+        self.visual_callback() #TODO: resolve this temporary location
+
     def get_total_evals(self):
         """Returns the number of calls to loss function"""
         return cluster.sum_all(self.evals)
 
-    def notify_new_improvement(self, idx):
-        self.result_pulled = False
-
     def pull_result(self):
         """Updates best known result data on master node by pulling from cluster"""
+        
+        # Tell every node whether new result is available
+        self.new_best_result = cluster.broadcast(self.new_best_result)
 
-        # If newer resuls are available, pull them to master node
-        if not self.result_pulled:
+        # If newer resuls is available, pull it to master node
+        if self.new_best_result:
 
             # Tell every node what is the best result_id and who owns that file
             data = (self.result_id, self.result_owner)
@@ -342,24 +356,15 @@ class open_modelica():
 
             # Every node gets notified that newest results have been
             # successfully delivered to the master node
-            self.result_pulled = True
+            self.new_best_result = False
 
     def get_result(self):
         """Returns best of results found so far"""
 
-        # make sure that master has the newest results
+        # make sure that master has the newest best result
         self.pull_result()
-
+        
         if cluster.global_rank == 0:
             return self.result
-
-    def post_gbest_update_actions(self):
-        self.pull_result()
-        if cluster.global_rank == 0:
-            self.save_parameters()
-            self.save_loss()
-
-
-
 
 
