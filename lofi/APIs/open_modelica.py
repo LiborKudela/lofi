@@ -6,6 +6,7 @@ import numpy as np
 import os
 from subprocess import call, PIPE
 from DyMat import DyMatFile
+import pandas as pd
 from ..visualizers.visualizers import default_visual_callback
 
 class xml_init_file_handler():
@@ -323,9 +324,41 @@ class open_modelica():
         self.result_id = res_id 
         self.new_best_result = True
 
+    @cluster.on_master
+    def update_viz_file(self, res):
+    
+        lck_path = self.viz_file + ".locked"
+        while os.path.exists(lck_path): 
+            cluster.time.sleep(0.001)
+
+        # lock access
+        open(lck_path, 'w').close()
+
+        store = pd.HDFStore(self.viz_file)
+
+        #model data
+        t = res.getVarArray([self.plot_vars[0]])[0,:]
+        model_df = pd.DataFrame(index=t)
+        for name in self.plot_vars:
+            model_df[name] = res.getVarArray([name])[1,:]
+        store['model_df'] = model_df
+
+        #api data
+        api_df = pd.DataFrame(data={'evals': [self.total_evals],
+                                    'loss': [self.y]})
+        if 'api_df' in store.keys():
+            store.append('api_df', api_df, format='t')
+        else:
+            store.put('api_df', api_df, format='t')
+        store.close()
+
+        #unlock access
+        os.remove(lck_path)
+
     def update_log(self):
         self.total_evals = self.get_total_evals()
-        self.visual_callback() #TODO: resolve this temporary location
+        res = self.get_result()
+        self.update_viz_file(res)
 
     def get_total_evals(self):
         """Returns the number of calls to loss function"""
