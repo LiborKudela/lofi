@@ -90,15 +90,16 @@ class open_modelica():
                  force_recompilation=False,
                  abort_slow=0,
                  solver='dassl',
-                 fast_storage="/dev/shm/" if os.path.isdir("/dev/shm") else None,
-                 visual_callback=default_visual_callback):
+                 tmp_storage=None):
 
         # resolve file paths
         files = [files] if type(files) is not list else files
         self.files = [os.path.abspath(file) for file in files]
         self.model = model
-        if fast_storage is not None:
-            prefix = fast_storage
+        if tmp_storage is not None:
+            prefix = tmp_storage
+        if os.path.isdir('/dev/shm'):
+            prefix = '/dev/shm/'
         else:
             prefix = os.getcwd()
         self.compile_dir = prefix + f"/compiled_" + self.model
@@ -141,15 +142,13 @@ class open_modelica():
         if cluster.global_rank == 0:
             self.p = self.p_start
             self.y = self.loss(self.p, result_tag_override=0)[0]
+            self.result = self.read_result_file(0)
         self.result_owner = None
         self.result_id = None
         self.new_best_result = False
 
-        # resolve visual callback reference/validity
-        if visual_callback is None:
-            self.visual_callback = lambda : None
-        else:
-            self.visual_callback = visual_callback(self)
+        self.log = pd.DataFrame(columns=['evals',
+                                         'loss'])
 
     def hash(self):
         """Calculates md5 hash of the model .mo files"""
@@ -327,13 +326,6 @@ class open_modelica():
     @cluster.on_master
     def update_viz_file(self, res):
     
-        lck_path = self.viz_file + ".locked"
-        while os.path.exists(lck_path): 
-            cluster.time.sleep(0.001)
-
-        # lock access
-        open(lck_path, 'w').close()
-
         store = pd.HDFStore(self.viz_file)
 
         #model data
@@ -343,22 +335,18 @@ class open_modelica():
             model_df[name] = res.getVarArray([name])[1,:]
         store['model_df'] = model_df
 
-        #api data
-        api_df = pd.DataFrame(data={'evals': [self.total_evals],
-                                    'loss': [self.y]})
-        if 'api_df' in store.keys():
-            store.append('api_df', api_df, format='t')
-        else:
-            store.put('api_df', api_df, format='t')
+        #log data
+        self.log.loc[len(self.log)] = [self.total_evals, self.y]
+        store['api_df'] = self.log
         store.close()
-
-        #unlock access
-        os.remove(lck_path)
 
     def update_log(self):
         self.total_evals = self.get_total_evals()
         res = self.get_result()
-        self.update_viz_file(res)
+        try:
+            self.update_viz_file(res)
+        except:
+            None
 
     def get_total_evals(self):
         """Returns the number of calls to loss function"""
