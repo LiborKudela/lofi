@@ -14,7 +14,7 @@
    version="1.1"
    id="svg8"
    sodipodi:docname="logo.svg"
-   inkscape:version="1.0.1 (0767f8302a, 2020-10-17)">
+   inkscape:version="0.92.5 (2060ec1f9f, 2020-04-08)">
   <defs
      id="defs2">
     <marker
@@ -5663,15 +5663,15 @@
      inkscape:pageopacity="0.0"
      inkscape:pageshadow="2"
      inkscape:zoom="0.90509668"
-     inkscape:cx="529.78124"
-     inkscape:cy="732.85561"
+     inkscape:cx="331.45988"
+     inkscape:cy="728.43619"
      inkscape:document-units="mm"
-     inkscape:current-layer="layer1"
+     inkscape:current-layer="text6762-7"
      showgrid="false"
      inkscape:window-width="3840"
-     inkscape:window-height="2105"
+     inkscape:window-height="2096"
      inkscape:window-x="1440"
-     inkscape:window-y="185"
+     inkscape:window-y="200"
      inkscape:window-maximized="1"
      inkscape:snap-global="true"
      inkscape:snap-intersection-paths="false"
@@ -5691,7 +5691,7 @@
         <dc:format>image/svg+xml</dc:format>
         <dc:type
            rdf:resource="http://purl.org/dc/dcmitype/StillImage" />
-        <dc:title></dc:title>
+        <dc:title />
       </cc:Work>
     </rdf:RDF>
   </metadata>
@@ -5925,20 +5925,28 @@
          sodipodi:nodetypes="cccc"
          inkscape:export-xdpi="400"
          inkscape:export-ydpi="400" />
-      <text
-         xml:space="preserve"
-         style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:34.2466px;line-height:1.25;font-family:Comfortaa;-inkscape-font-specification:'Comfortaa Bold';letter-spacing:0px;word-spacing:0px;fill:url(#linearGradient10058-9-3);fill-opacity:1;stroke:none;stroke-width:0.201445"
-         x="-2548.6694"
-         y="-6267.1353"
-         id="text6762-7"
-         inkscape:export-xdpi="400"
-         inkscape:export-ydpi="400"
-         transform="scale(1.0011211,0.99888016)"><tspan
-           sodipodi:role="line"
-           id="tspan6760-4"
-           x="-2554.2944"
-           y="-6267.1353"
-           style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:143.375px;font-family:Comfortaa;-inkscape-font-specification:'Comfortaa Bold';text-align:center;letter-spacing:-11.25px;text-anchor:middle;fill:url(#linearGradient10058-9-3);fill-opacity:1;stroke-width:0.201445">LOFI</tspan></text>
+      <g
+         aria-label="LOFI"
+         transform="scale(1.0011211,0.99888016)"
+         style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:34.2466011px;line-height:1.25;font-family:Comfortaa;-inkscape-font-specification:'Comfortaa Bold';letter-spacing:0px;word-spacing:0px;fill:url(#linearGradient10058-9-3);fill-opacity:1;stroke:none;stroke-width:0.201445"
+         id="text6762-7">
+        <path
+           d="m -2624.4142,-6282.0463 h -51.9018 v -89.6093 c 0,-4.1579 -3.2976,-7.4555 -7.4555,-7.4555 -4.0145,0 -7.3121,3.2976 -7.3121,7.4555 v 97.0648 c 0,4.3013 3.1543,7.4555 7.3121,7.4555 h 59.3573 c 4.1579,0 7.4555,-3.2976 7.4555,-7.4555 0,-4.1578 -3.2976,-7.4555 -7.4555,-7.4555 z"
+           style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:143.375px;font-family:Comfortaa;-inkscape-font-specification:'Comfortaa Bold';text-align:center;letter-spacing:-11.25px;text-anchor:middle;fill:url(#linearGradient10058-9-3);fill-opacity:1;stroke-width:0.201445"
+           id="path5089" />
+        <path
+           d="m -2568.5652,-6380.5449 c -33.6931,0 -56.9199,23.8003 -56.9199,57.35 0,33.6931 23.2268,57.4934 56.9199,57.4934 33.5498,0 56.9199,-23.8003 56.9199,-57.4934 0,-33.5497 -23.3701,-57.35 -56.9199,-57.35 z m 0,13.4773 c 24.9473,0 42.5824,18.9255 42.5824,43.8727 0,24.9473 -17.6351,44.0161 -42.5824,44.0161 -24.9472,0 -42.5824,-19.0688 -42.5824,-44.0161 0,-24.9472 17.6352,-43.8727 42.5824,-43.8727 z"
+           style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:143.375px;font-family:Comfortaa;-inkscape-font-specification:'Comfortaa Bold';text-align:center;letter-spacing:-11.25px;text-anchor:middle;fill:url(#linearGradient10058-9-3);fill-opacity:1;stroke-width:0.201445"
+           id="path5091" />
+        <path
+           d="m -2452.4982,-6330.507 h -41.1487 v -34.8401 h 57.35 c 4.3013,0 7.3122,-2.7242 7.3122,-6.7387 0,-4.1578 -3.0109,-7.0253 -7.3122,-7.0253 h -64.8055 c -4.3012,0 -7.4555,3.1542 -7.4555,7.4555 v 97.0648 c 0,4.1579 3.2977,7.4555 7.4555,7.4555 4.1579,0 7.4555,-3.2976 7.4555,-7.4555 v -42.1522 h 41.1487 c 4.3012,0 7.3121,-2.8675 7.3121,-6.882 0,-4.0145 -3.0109,-6.882 -7.3121,-6.882 z"
+           style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:143.375px;font-family:Comfortaa;-inkscape-font-specification:'Comfortaa Bold';text-align:center;letter-spacing:-11.25px;text-anchor:middle;fill:url(#linearGradient10058-9-3);fill-opacity:1;stroke-width:0.201445"
+           id="path5093" />
+        <path
+           d="m -2421.1662,-6371.6556 v 97.0648 c 0,4.3013 3.1543,7.4555 7.4555,7.4555 4.3013,0 7.4555,-3.1542 7.4555,-7.4555 v -97.0648 c 0,-4.3013 -3.1542,-7.4555 -7.4555,-7.4555 -4.3012,0 -7.4555,3.1542 -7.4555,7.4555 z"
+           style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:143.375px;font-family:Comfortaa;-inkscape-font-specification:'Comfortaa Bold';text-align:center;letter-spacing:-11.25px;text-anchor:middle;fill:url(#linearGradient10058-9-3);fill-opacity:1;stroke-width:0.201445"
+           id="path5095" />
+      </g>
       <path
          style="opacity:1;fill:#f0b7aa;fill-opacity:1;stroke:none;stroke-width:6.58045;stroke-linecap:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;paint-order:stroke fill markers"
          d="m -2803.5501,-6475.1583 a 9.4397166,9.4185867 0 0 0 -9.439,9.4191 9.4397166,9.4185867 0 0 0 9.439,9.4181 9.4397166,9.4185867 0 0 0 9.441,-9.4181 9.4397166,9.4185867 0 0 0 -9.441,-9.4191 z m 0,4.5137 a 4.9165195,4.9055144 0 0 1 4.918,4.9054 4.9165195,4.9055144 0 0 1 -4.918,4.9054 4.9165195,4.9055144 0 0 1 -4.916,-4.9054 4.9165195,4.9055144 0 0 1 4.916,-4.9054 z"
