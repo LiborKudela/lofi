@@ -7,7 +7,7 @@ import os
 from subprocess import call, PIPE
 from DyMat import DyMatFile
 import pandas as pd
-from ..visualizers.visualizers import default_visual_callback
+from .py_api import Model_api
 
 class xml_init_file_handler():
     def __init__(self, init_file):
@@ -80,17 +80,13 @@ class xml_init_file_handler():
                 variables.append(sv[info_key])
         return variables
 
-    def write_new_setup(self, output_path):
-        if cluster.global_rank == 0:
-            self.tree.write(output_path)
-
-
-class open_modelica():
+class open_modelica(Model_api):
     def __init__(self, files, model,
                  force_recompilation=False,
                  abort_slow=0,
                  solver='dassl',
-                 tmp_storage=None):
+                 tmp_storage=None,
+                 init_statei=None):
 
         # resolve file paths
         files = [files] if type(files) is not list else files
@@ -106,13 +102,15 @@ class open_modelica():
         self.result_dir = prefix + f"/result_" + self.model
         self.compiled_file = self.compile_dir + f"/{self.model}"
         self.init_file = self.compiled_file + "_init.xml"
-        self.viz_file = prefix + f"lofi_viz_data/{self.model}.h5"
+        self.viz_dir = prefix + f"lofi_viz_data"
+        self.viz_file = self.viz_dir + f"/{self.model}.h5"
 
         # JIT compile if necessary (or forced)
         self.force_recompilation = force_recompilation
         if self.model_changed() or self.force_recompilation:
             self.compile()
         self.make_dir(self.result_dir)
+        self.make_dir(self.viz_dir, clear=False)
 
         self.abort_slow = abort_slow
         self.solver = solver
@@ -121,13 +119,10 @@ class open_modelica():
         # read init_file for information about the compiled model
         self.xml_info = xml_init_file_handler(self.init_file)
 
-        # get objectives from within parsed init_file
+        # get parameter info from within parsed init_file
+        # this needs to be here before call to super().__init__()
         self.y_names = self.xml_info.get_objectives("name")
-        self.y_len = len(self.y_names)
-
-        # get parameters from within parsed init_file
         self.p_names = self.xml_info.get_parameters("name")
-        self.m = len(self.p_names)
         self.p_lb = np.array(self.xml_info.get_parameters("lower_bound"))
         self.p_ub = np.array(self.xml_info.get_parameters("upper_bound"))
         self.p_start = self.xml_info.get_parameters("start")
@@ -135,20 +130,7 @@ class open_modelica():
         # get variables to be plotted from withing init_file
         self.plot_vars = self.xml_info.get_plot_variables("name")
 
-        # evaluation counter
-        self.evals = 0
-
-        # model state with res_file reference info
-        if cluster.global_rank == 0:
-            self.p = self.p_start
-            self.y = self.loss(self.p, result_tag_override=0)[0]
-            self.result = self.read_result_file(0)
-        self.result_owner = None
-        self.result_id = None
-        self.new_best_result = False
-
-        self.log = pd.DataFrame(columns=['evals',
-                                         'loss'])
+        super().__init__()
 
     def hash(self):
         """Calculates md5 hash of the model .mo files"""
@@ -176,11 +158,11 @@ class open_modelica():
         return not os.path.exists(self.compile_dir) or not self.read_hash() == self.hash()
 
     @cluster.on_master
-    def make_dir(self, dir):
+    def make_dir(self, dir, clear=True):
         """Creates folder of given name"""
         if not os.path.exists(dir):
             os.mkdir(dir)
-        else:
+        elif clear:
             os.system("rm " + dir + "/*")
 
     @cluster.on_machine
@@ -205,11 +187,13 @@ class open_modelica():
         os.system(command)
         self.write_hash()
 
+    # simulation related functions
     def get_simulation_command_root(self):
         """Construct the basic flags/options for the model executable"""
         flags = f" -inputPath={self.compile_dir}"
         flags += " -lv=-LOG_STATS,-stdout,-assert"
         flags += f" -s={self.solver}"
+        flags += " -cpu"
         if self.abort_slow > 0:
             flags += f" -alarm={self.abort_slow}"
         return self.compiled_file + flags
@@ -219,11 +203,8 @@ class open_modelica():
         return self.result_dir + f"/{key}_{id}.mat"
 
     def result_file_flag(self, id, key="tag"):
-        """Constructs result path for the model executable"""
+        """Constructs result path flag for the model executable"""
         return " -r=" + self.get_result_path(id)
-
-    def read_result_file(self, id, key="tag"):
-        return DyMatFile(self.get_result_path(id))
 
     def override_parameters(self, p):
         """Construcst flag that overrides parameters in the model executable"""
@@ -231,6 +212,21 @@ class open_modelica():
         for i in range(self.m):
             flag += f"{self.p_names[i]}={p[i]},"
         return flag
+
+    def evaluate(self, prms, result_tag):
+        """Build shell command with all flags and runs the executable"""
+        command = self.get_simulation_command_root()
+        command += self.result_file_flag(result_tag)
+        command += self.override_parameters(prms)
+        return call(command, shell=True, stdout=PIPE, stderr=PIPE)
+
+    def get_tagged_result(self, id, key="tag"):
+        """Loads the result file dropped by the executable"""
+        return DyMatFile(self.get_result_path(id))
+
+    def extract_raw_loss(self, result):
+        """Extracts arrays coresponding to all vars. marked as #objective"""
+        return result.getVarArray(self.y_names, withAbscissa=False)[0:,:]
 
     @cluster.on_master
     def get_formatted_parameters(self):
@@ -248,144 +244,15 @@ class open_modelica():
         with open(self.model + "_solution.txt", "w") as f:
             f.write(self.get_formatted_parameters())
 
-    @cluster.on_master
-    def print_parameters(self):
-        """Prints the best known parameters in OM override_file format"""
 
-        print(self.get_formatted_parameters())
 
-    def call_simulation(self, prms, result_tag):
-        command = self.get_simulation_command_root()
-        command += self.result_file_flag(result_tag)
-        command += self.override_parameters(prms)
-        return call(command, shell=True, stdout=PIPE, stderr=PIPE)
 
-    def extract_raw_loss(self, result):
-        return result.getVarArray(self.y_names, withAbscissa=False)[0:,:]
 
-    @cluster.on_master
-    def get_formated_loss(self, f=np.max):
-        "Returns string of the best known losses"
-        formated_loss = ""
-        y = self.extract_raw_loss(self.get_result()) 
-        for name, value in zip(self.y_names, f(y, axis=0)):
-            formated_loss += f"{name}={value}\n"
-        return formated_loss
 
-    def print_loss(self, f=np.max):
-        if cluster.global_rank == 0:
-            print(self.get_formated_loss(f=f))
 
-    def save_loss(self, f=np.max):
-        # master opens file and writes the content into it
-        if cluster.global_rank == 0:
-            with open(self.model + "_loss.txt", "w") as f:
-                f.write(self.get_formatted_loss(f=f))
 
-    def inf_loss(self, prms, timer):
-        return np.inf, np.sum(np.abs(prms)), 1, timer.get_elapsed(), cluster.global_rank
 
-    def real_loss(self, y, prms, timer):
-        return np.sum(y), np.sum(np.abs(prms)), 0, timer.get_elapsed(), cluster.global_rank
 
-    def loss(self, prms, result_tag_override=None):
-        """Executes model with given parameters and returns tuple of sim. data"""
 
-        timer = cluster.timer()
-        self.evals += 1
-
-        # resolve name (tag/id) of the result file
-        if result_tag_override is not None:
-            result_tag = result_tag_override
-        else:
-            result_tag = cluster.status.Get_tag()
-
-        retcode = self.call_simulation(prms, result_tag)
-
-        if retcode != 0:
-            return self.inf_loss(prms, timer)
-        else:
-            result = self.read_result_file(result_tag)
-            y = self.extract_raw_loss(result)  # y is a np.array of floats
-
-        if np.any(np.isnan(y)) or np.any(np.isinf(y)):
-            return self.inf_loss(prms, timer)
-        else:
-            return self.real_loss(y, prms, timer)
-
-    @cluster.on_master
-    def update_state(self, p, y, owner=None, res_id=None):
-        "This function updates the current best state of the model"
-        self.y = y
-        self.p[:] = p
-        self.save_parameters()
-        self.result_owner = owner
-        self.result_id = res_id 
-        self.new_best_result = True
-
-    @cluster.on_master
-    def update_viz_file(self, res):
-    
-        store = pd.HDFStore(self.viz_file)
-
-        #model data
-        t = res.getVarArray([self.plot_vars[0]])[0,:]
-        model_df = pd.DataFrame(index=t)
-        for name in self.plot_vars:
-            model_df[name] = res.getVarArray([name])[1,:]
-        store['model_df'] = model_df
-
-        #log data
-        self.log.loc[len(self.log)] = [self.total_evals, self.y]
-        store['api_df'] = self.log
-        store.close()
-
-    def update_log(self):
-        self.total_evals = self.get_total_evals()
-        res = self.get_result()
-        try:
-            self.update_viz_file(res)
-        except:
-            None
-
-    def get_total_evals(self):
-        """Returns the number of calls to loss function"""
-        return cluster.sum_all(self.evals)
-
-    def pull_result(self):
-        """Updates best known result data on master node by pulling from cluster"""
-        
-        # Tell every node whether new result is available
-        self.new_best_result = cluster.broadcast(self.new_best_result)
-
-        # If newer resuls is available, pull it to master node
-        if self.new_best_result:
-
-            # Tell every node what is the best result_id and who owns that file
-            data = (self.result_id, self.result_owner)
-            self.result_id, self.result_owner = cluster.broadcast(data)
-
-            # If a node is the owner of the wanted file, it reads the data and
-            # sends the data to the master node (the zero node)
-            if self.result_owner == cluster.global_rank:
-                result = self.read_result_file(self.result_id)
-                cluster.comm.send(result, 0)
-
-            # Master node receives data from the owner of new best results
-            if cluster.global_rank == 0:
-                self.result = cluster.comm.recv(None, source=self.result_owner)
-
-            # Every node gets notified that newest results have been
-            # successfully delivered to the master node
-            self.new_best_result = False
-
-    def get_result(self):
-        """Returns best of results found so far"""
-
-        # make sure that master has the newest best result
-        self.pull_result()
-        
-        if cluster.global_rank == 0:
-            return self.result
 
 
