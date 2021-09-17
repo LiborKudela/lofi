@@ -16,6 +16,7 @@ setup(
     url='https://github.com/LiborKudela/lofi',
     install_requires=[
         'numpy>=1.19.2',
+        'pandas>=1.2.3',
         'DyMat>=0.7',
         'mpi4py>=3.0.3',
         'matplotlib>=3.1.0'],
