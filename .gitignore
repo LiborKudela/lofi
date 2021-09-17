@@ -1,3 +1,5 @@
 *__pycache__*
 *.txt
 *.swp
+*prof.intdata
+*prof.realdata
