@@ -28,8 +28,8 @@ class Model_api():
         # model state with res_file reference info
         if cluster.global_rank == 0:
             self.p = self.p_start
-            self.y = self.loss(self.p, result_tag_override=0)[0]
-            self.result = self.get_tagged_result(0)
+            self.y = self.loss(self.p)[0]
+            self.result = self.acquire_result()
         self.result_owner = None
         self.result_id = None
         self.new_best_result = False
@@ -38,14 +38,17 @@ class Model_api():
 
         self.log = pd.DataFrame(columns=['Evaluations','Loss']) 
 
-    def evaluate(self, prms, result_tag):
+    def forward(self, x=None, prms=None):
+        if prms is None:
+            prms = self.p
+
+    def evaluate(self, prms):
         """Evaluates model with parameters prms and saves results.
-           Results might be droped into a file.
-           The tag serves as a identifier thah might be used in the filename."""
+           Results might be droped into a file."""
         pass
 
-    def get_tagged_result(self, result_tag):
-        """Returns object contaning all results of forward pass
+    def acquire_result(self, result_id=None):
+        """Returns object contaning all results of a forward pass
            (might be a content of a file)"""
         pass
 
@@ -54,12 +57,9 @@ class Model_api():
         result returned by get_tagged_result function"""
         pass
 
-    def export_result(self, result):
-        """Exports result into hdf DataFrame"""
-        pass
-
     @cluster.on_master
     def save_parameters(self):
+        """Gets called when everytime model improves"""
         pass
 
     # this section is common to all APIs
@@ -70,23 +70,17 @@ class Model_api():
     def real_loss(self, y, prms, timer):
         return np.sum(y), np.sum(np.abs(prms)), 0, timer.get_elapsed(), cluster.global_rank
 
-    def loss(self, prms, result_tag_override=None):
+    def loss(self, prms):
 
         timer = cluster.timer()
         self.evals += 1
 
-        # resolve name (tag/id) of the result file
-        if result_tag_override is not None:
-            result_tag = result_tag_override
-        else:
-            result_tag = cluster.status.Get_tag()
-
-        retcode = self.evaluate(prms, result_tag)
+        retcode = self.evaluate(prms)
 
         if retcode != 0:
             return self.inf_loss(prms, timer)
         else:
-            result = self.get_tagged_result(result_tag)
+            result = self.acquire_result()
             y = self.extract_raw_loss(result)  # y is a np.array of floats
 
         if np.any(np.isnan(y)) or np.any(np.isinf(y)):
@@ -111,11 +105,12 @@ class Model_api():
     @cluster.on_master
     def update_visualizer(self):
         if self.visualizer is not None:
-            data = Data(self.log, None)
+            data = Data(self.log, self.result)
             self.visualizer.update_data(data)
 
     def update_log(self):
         self.total_evals = self.get_total_evals()
+        self.pull_result()
         if cluster.global_rank == 0:
             self.log.loc[len(self.log)]=[
                 self.total_evals,
@@ -140,7 +135,7 @@ class Model_api():
             # If a node is the owner of the wanted file, it reads the data and
             # sends the data to the master node (the zero node)
             if self.result_owner == cluster.global_rank:
-                result = self.get_tagged_result(self.result_id)
+                result = self.acquire_result(self.result_id)
                 cluster.comm.send(result, 0)
 
             # Master node receives data from the owner of new best results
