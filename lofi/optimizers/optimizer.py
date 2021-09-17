@@ -4,13 +4,13 @@ import time
 
 class Options():
     def __init__(self):
-        self.n = 40                  # population size
         self.max_iter = 0            # maximum number of iterations
         self.max_error = -np.inf     # maximum allowed error
         self.limit_space = True      # optional coordinate bound control
         self.sparse_program = False  # optional regularization for sparsity
         self.sparsity_weight = 1.0   # weight to penalize density of program
         self.active_callback = True  # activates reports to terminal
+        self.dynamic = True          # temporary experimental implementation 
 
 class Optimizer():
     def __init__(self, M=None, options=Options):
@@ -33,27 +33,56 @@ class Optimizer():
         self.iter = 0
         self.options.max_iter = 0
         self.initialize_state()
-    
+        self.initialize_parameter_array()
+        self.results = []
+
     @cluster.on_master
     def initialize_state(self):
         """This function initializes variables for specific algorithm"""
         pass
 
+    def initialize_parameter_array(self):
+        if cluster.global_rank == 0:
+            shape = self.p.shape
+            if self.options.dynamic:
+                self.p_array = np.zeros((shape[0] + 1, shape[1]))
+            else:
+                self.p_array = np.zeros(shape)
+        else:
+            self.p_array = None
+
     @cluster.on_master
-    def extract_results(self, r):
+    def fill_parameter_array(self):
+        if self.options.dynamic:
+            self.p_array[:-1] = self.p  # add new population of the method
+            self.p_array[-1] = self.M.p # add current gbest (loss can be dynamic)
+        else:
+            self.p_array = self.p
+
+    @cluster.on_master
+    def resolve_gbest_result(self):
+        if self.options.dynamic:
+            self.M.y = self.results[-1][0]
+
+    @cluster.on_master
+    def extract_results(self):
         # mutate r into an array so each value type corresponds to a single row
         # r[0,:]=losses, r[1,:]=densities, r[2,:]=return codes, r[3,:]=sim. elapsed times
-        r = np.array(r).transpose()
+        if self.options.dynamic:
+            r = np.array(self.results[:-1]).transpose()
+        else:
+            r = np.array(self.results).transpose()
+        total = r.shape[1]
 
         # read results by type (rows)
         self.y[:] = r[0,:]
         if self.options.sparse_program:
             self.y += r[1,:]
         self.failed = np.count_nonzero(r[2,:])
-        self.survived = self.options.n - self.failed
-        self.mean_sim_cpu_time = np.sum(r[3,:])/self.options.n
+        self.survived = total - self.failed
+        self.mean_sim_cpu_time = np.sum(r[3,:])/total
         self.result_owner = r[4,:]
-        
+
     @cluster.on_master
     def pre_gbest_update_actions(self):
         """This function is called prior to gbest_update"""
@@ -70,7 +99,7 @@ class Optimizer():
 
     def update_log(self):
         self.M.update_log()
-    
+
     @cluster.on_master
     def enforce_bounds_on_samples(self):
         if self.options.limit_space:
@@ -79,7 +108,7 @@ class Optimizer():
     @cluster.on_master
     def update_iteration_counter(self):
         self.iter += 1
-    
+
     @cluster.on_master
     def check_termination(self):
         self.terminate = any([
@@ -89,11 +118,11 @@ class Optimizer():
     def update_termination(self):
         self.check_termination()
         self.terminate = cluster.broadcast(self.terminate)
-    
+
     @cluster.on_master
     def generate_new_epoch_data(self):
         """This method that assigns new self.p etc."""
-        pass 
+        pass
 
     @cluster.on_master
     def adaptation(self):
@@ -102,7 +131,7 @@ class Optimizer():
 
     @cluster.on_master
     def update_console_table(self):
-       tbl = f"""       
+       tbl = f"""
 \033[K+===========================================+
 \033[KAlgorithm: {self.name}
 \033[KModel    : {self.M.model}
@@ -114,13 +143,15 @@ class Optimizer():
 \033[KSuccess  : {self.survived:d}
 \033[KFailure  : {self.failed:d}
 \033[K+===========================================+
-""" 
+"""
        print(tbl, end = "\n" if self.terminate else "\033[F"*tbl.count("\n"))
 
     def next_epoch(self):
         epoch_timer = cluster.timer()
-        results = cluster.map(self.M.loss, self.p)
-        self.extract_results(results)
+        self.fill_parameter_array()
+        self.results = cluster.map(self.M.loss, self.p_array)
+        self.resolve_gbest_result()
+        self.extract_results()
         self.pre_gbest_update_actions()
         self.update_gbest()
         self.adaptation()
@@ -132,7 +163,7 @@ class Optimizer():
         self.total_time += self.epoch_time
         self.update_log()
         self.update_console_table()
-    
+
     @cluster.on_master
     def add_to_max_iter(self, number):
         self.options.max_iter += number

@@ -4,6 +4,7 @@ import numpy as np
 class PSO_options(Options):
     def __init__(self):
         super().__init__()
+        self.n = 40    # population size
         self.w = 0.7
         self.c1 = 2.0
         self.c2 = 2.0

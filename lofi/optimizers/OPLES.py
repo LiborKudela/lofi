@@ -3,6 +3,7 @@ from .optimizer import Optimizer, Options, cluster, np
 class OPLES_options(Options):
     def __init__(self):
         super().__init__()
+        self.n = 40                  # population size
         self.max_sigma = 1e-1        # max sampling deviation
         self.min_sigma = 1e-8        # min sampling deviation
         self.sigma_init = 1e-2       # initial sigma
