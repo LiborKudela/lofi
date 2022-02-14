@@ -1,4 +1,3 @@
-import threading
 import dash
 import dash_core_components as dcc
 import dash_html_components as html
@@ -11,36 +10,20 @@ import logging
 
 class Visualizer():
     @cluster.on_master
-    def __init__(self, model_api=None):
+    def __init__(self, name=""):
 
-        self.lock = threading.Lock()
-
+        self.name = name
         external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
         self.app = dash.Dash(external_stylesheets=external_stylesheets) 
 
         # visual components
         self.displays = []
-        self.tabs = [graph_tab('Main', 1), graph_tab('Second', 2)]
-        self.figures = [lambda value: f'{value}', lambda value: f'{value}']
+        self.tabs = []
+        self.figures = []
 
-        if model_api is not None:
-            self.connect_model(model_api)
-
-        self.data = None
-
-    @cluster.on_master
-    def connect_model(self, model_api):
-        model_api.visualizer = self
-        self.model_name = model_api.model
-
-        self.displays = []
-        for label in model_api.log.columns:
-            self.displays.append(display(label))
-
-    @cluster.on_master
-    def update_data(self, data):
-        with self.lock:
-            self.data = data
+        # trigers
+        self.figure_interval = 1000
+        self.display_interval = 500
 
     @cluster.on_master
     def build_app(self):
@@ -50,12 +33,22 @@ class Visualizer():
     @cluster.on_master
     def start_app(self):
         logging.getLogger('werkzeug').setLevel(logging.ERROR)
-        thread = threading.Thread(target = self.app.run_server)
+        thread = cluster.threading.Thread(target = self.app.run_server,
+                                          daemon=True)
         thread.start()
 
     @cluster.on_master
     def debug_mode(self):
         self.app.run_server(debug=True)
+
+    def display_recipe(self, none=None):
+        if cluster.global_rank == 0:
+            def decorator(f):
+                self.displays.append(f)
+        else:
+            def decorator(f):
+                pass
+        return decorator
 
     def figure_recipe(self, name="Unnamed"):
         if cluster.global_rank == 0:
@@ -70,7 +63,7 @@ class Visualizer():
 
     def set_layout(self):
         self.app.layout = html.Div([
-            html.H1(self.model_name, style={'text-align': 'center'}),
+            html.H1(self.name, style={'text-align': 'center'}),
             html.Div(
                 id='main-menu',
                 children=[
@@ -81,7 +74,7 @@ class Visualizer():
             ),
             html.Div(
                 id='display-bar',
-                children=self.displays,
+                children=[],
                 style=display_bar
             ),
             html.Div(
@@ -100,8 +93,8 @@ class Visualizer():
                     'height':'70vh',
                 },
             ),
-            interval_trigger('displays', 100),
-            interval_trigger('figures', 1000),
+            interval_trigger('displays', self.display_interval),
+            interval_trigger('figures', self.figure_interval),
         ],
         style={'height':'90vh'}
         )
@@ -134,18 +127,16 @@ class Visualizer():
 
         # UPDATE ALL DISPLAYS
         @self.app.callback(
-            Output({'type': 'display-value','label': MATCH}, 'children'),
+            Output('display-bar', 'children'),
             Input({'type': 'refresh-trigger', 'trigers': 'displays'},'n_intervals'),
             Input('single-refresh-btn','n_clicks'),
-            State({'type':'display-value','label': MATCH}, 'id'),
         )
-        def update_displays(n_intervals, n_clicks, id):
-            try:
-                value = self.data.log[id['label']].iloc[-1]
-                value = f'{value}'
-            except:
-                value = 'Unavailable'
-            return value
+        def update_displays(n_intervals, n_clicks):
+            children = []
+            for recipe in self.displays:
+                for item in recipe().items():
+                    children.append(display(item[0], item[1]))
+            return children
 
         @self.app.callback(
             Output('tabs-content', 'children'),
@@ -155,7 +146,7 @@ class Visualizer():
         )
         def update_figures(n_intervals, n_clicks, value):
             div = dcc.Graph(
-                figure=self.figures[value-1](self.data),
+                figure=self.figures[value-1](),
                 config={'responsive':True},
                 style={'width': '100%', 'height': '100%'},
             )
@@ -169,13 +160,14 @@ def menu_button(text, id=None, style=None):
         b = html.Button(text, id=id, n_clicks=0, style=style)
     return b
 
-def display(label):
+def display(label, value):
     div = html.Div(
         children=[
             html.H5(
                 children=label),
-            html.H1(id={'type':'display-value','label':label},
-                children='Initial')],
+            html.H1(
+                id={'type':'display-value','label':label},
+                children=f'{value}')],
         style={'width': 240,
                'margin': '1px',
                'display': 'inline-block',

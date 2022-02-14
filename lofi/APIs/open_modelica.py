@@ -9,6 +9,23 @@ from DyMat import DyMatFile
 import pandas as pd
 from .model_api import Model_api
 
+class SV_list():
+    def __init__(self, original):
+        self.original = original
+
+    def filter(self, by_tags):
+        filtered = []
+        for sv in self.original:
+            if any(tag in sv["hashtags"] for tag in by_tags):
+                filtered.append(sv)
+        return SV_list(filtered)
+
+    def get_attributes(self, attr):
+        attr_values = []
+        for sv in self.original:
+            attr_values.append(sv[attr])
+        return attr_values
+
 class init_file_handler():
     def __init__(self, init_file):
         self.init_file = init_file
@@ -49,26 +66,24 @@ class init_file_handler():
                 all.append(dict)
             return all
 
-    def parameters(self, info_key, tags):
+    def get_parameters(self):
         parameters = []
         for sv in self.all:
             passes = sv["variability"] == "parameter"
             passes = passes and sv["start"] is not None
             passes = passes and sv["classType"] != "rSen"
-            passes = passes and any(tag in sv["hashtags"] for tag in tags)
             if passes:
-                parameters.append(sv[info_key])
-        return parameters
+                parameters.append(sv)
+        return SV_list(parameters)
 
-    def continuous(self, info_key, tags):
-        objectives = []
+    def get_continuous(self):
+        continuous = []
         for sv in self.all:
             passes = sv["variability"] == "continuous"
             passes = passes and "der(" not in sv["name"]
-            passes = passes and any(tag in sv["hashtags"] for tag in tags)
             if passes:
-                objectives.append(sv[info_key])
-        return objectives
+                continuous.append(sv)
+        return SV_list(continuous)
 
 class open_modelica(Model_api):
     def __init__(self, files, model,
@@ -76,8 +91,7 @@ class open_modelica(Model_api):
                  abort_slow=0,
                  solver='dassl',
                  tmp_storage=None,
-                 init_state=None,
-                 stop_time=None):
+                 init_state=None):
 
         # resolve file paths
         files = [files] if type(files) is not list else files
@@ -101,29 +115,45 @@ class open_modelica(Model_api):
         if self.model_changed() or self.force_recompilation:
             self.compile()
         self.make_dir(self.result_dir)
-        self.make_dir(self.viz_dir, clear=False)
 
         self.abort_slow = abort_slow
         self.solver = solver
-        self.stop_time = stop_time
         cluster.comm.Barrier()  # synchronize here
 
         # read init_file.xml for variable info of the compiled model
         self.init_file = init_file_handler(self.init_file)
+        self.all_parameters = self.init_file.get_parameters()
+        self.all_continuous = self.init_file.get_continuous()
 
-        # get parameter info from within parsed init_file
-        # this needs to be here before call to super().__init__()
-        self.y_names = self.init_file.continuous("name", ["objective"])
-        self.p_names = self.init_file.parameters("name", ["optimize"])
-        self.p_lb = np.array(self.init_file.parameters("min", ["optimize"]))
-        self.p_ub = np.array(self.init_file.parameters("max", ["optimize"]))
-        self.p_start = self.init_file.parameters("start", ["optimize"])
+        self.parameters = self.all_parameters.filter(["optimize"])
+        self.p_names = self.parameters.get_attributes("name")
+        self.p_lb = np.array(self.parameters.get_attributes("min"))
+        self.p_ub = np.array(self.parameters.get_attributes("max"))
+        self.p_start = self.parameters.get_attributes("start")
+        self.p_hashtags = self.parameters.get_attributes("hashtags")
 
-        # get input/output names
-        self.input_names = self.init_file.continuous("name", ["input"])
-        self.output_names = self.init_file.continuous("name", ["output"])
+        self.outputs = self.all_continuous.filter(["objective"])
+        self.y_names = self.outputs.get_attributes("name")
+
+        self.y_len = len(self.y_names)
+        self.m = len(self.p_names)
+
+        self.input = {}
+        self.prms_override_str = ""
+        for i in range(self.m):
+            self.prms_override_str += f"{self.p_names[i]}" + "={}," 
 
         super().__init__()
+
+    def init(self, tag, method, **kwargs):
+        indices = []
+        for i in range(len(self.p_names)):
+            if tag in self.p_hashtags[i]:
+                indices.append(i)
+        indices = np.array(indices, dtype=np.int)
+        values = method(**kwargs, shape=indices.shape)
+        values = cluster.broadcast(values)
+        self.p[indices] = values
 
     def hash(self):
         """Calculates md5 hash of the model .mo files"""
@@ -199,47 +229,35 @@ class open_modelica(Model_api):
         """Constructs result path flag for the model executable"""
         return " -r=" + self.get_result_path(tag)
 
-    def override_parameters(self, p):
-        """Construcst flag that overrides parameters in the model executable"""
+    def override_flag(self, x, prms):
         flag = " -override "
-        flag += f"stopTime={self.stop_time}"
-        for i in range(self.m):
-            flag += f"{self.p_names[i]}={p[i]},"
+        for item in x.items():
+            flag += f"{item[0]}={item[1]},"
+        flag += self.prms_override_str.format(*prms)
         return flag
 
-    def override_flag(self, inputs, parameters):
-        flag = " -override "
-        for key in inputs.keys():
-            flag += f"{key}={value},"
-        for i in range(self.m):
-            flag += f"{self.p_names[i]}={p[i]}," 
-        return flag
-
-    def evaluate(self, prms=None, x=None):
-        """Runs OM model with inputs x and parameters prms."""
-        self.result_tag = cluster.status.Get_tag()
-        command = self.get_simulation_command_root()
-        command += self.result_file_flag(self.result_tag)
-        command += self.override_parameters(prms)
-        return call(command, shell=True, stdout=PIPE, stderr=PIPE)
-
-    def evaluate(self, prms):
+    def forward(self, x=None, prms=None, output=None):
         """Build shell command with all flags and runs the executable"""
-        self.result_tag = cluster.status.Get_tag()
+        gr = cluster.global_rank 
+        tid = cluster.threading.get_ident()
+        result_tag = f"gr{gr}tid{tid}"
         command = self.get_simulation_command_root()
-        command += self.result_file_flag(self.result_tag)
-        command += self.override_parameters(prms)
-        return call(command, shell=True, stdout=PIPE, stderr=PIPE)
-
-    def acquire_result(self, result_id=None):
-        """Loads the result file dropped by the executable"""
-        if result_id is None:
-            result_id = self.result_tag
-        return DyMatFile(self.get_result_path(result_id))
-
-    def extract_raw_loss(self, result):
-        """Extracts arrays coresponding to all init_file. marked as #objective"""
-        return result.getVarArray(self.y_names, withAbscissa=False)[0:,:]
+        command += self.result_file_flag(result_tag)
+        if prms is None:
+            prms = self.p
+        if x is None:
+            x = self.input
+        command += self.override_flag(x, prms)
+        retcode = call(command, shell=True, stdout=PIPE, stderr=PIPE)
+        if retcode != 0:
+            return None
+        result = DyMatFile(self.get_result_path(result_tag))
+        if output is None:
+            return result
+        y = result.getVarArray(output, withAbscissa=False)[0:,:]
+        if np.any(np.isnan(y)) or np.any(np.isinf(y)):
+            return None
+        return y
 
     @cluster.on_master
     def get_formatted_parameters(self):
@@ -256,16 +274,5 @@ class open_modelica(Model_api):
 
         with open(self.model + "_solution.txt", "w") as f:
             f.write(self.get_formatted_parameters())
-
-
-
-
-
-
-
-
-
-
-
 
 

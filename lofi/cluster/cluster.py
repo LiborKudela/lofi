@@ -1,8 +1,10 @@
 from mpi4py import MPI
+import threading
 import sys
 import time
 from collections import Mapping, Container
 import numpy as np
+import itertools
 
 comm = MPI.COMM_WORLD
 size = comm.Get_size()
@@ -47,7 +49,7 @@ class Options():
 
 options = Options()
 
-class timer():
+class Timer():
     def __init__(self):
         self.start_time = time.time()
         self.last_lap = self.start_time
@@ -74,57 +76,118 @@ def on_machine(f):
             return f(*args, **kwargs)
     return decorated_f
 
-class queue():
-    def __init__(self, data):
-        self.data_items = data
-        self.start_len = len(data)
-        self.next_item_idx = 0
+class Sequential_queue():
+    def __init__(self, args, kwargs):
 
-    def preallocate_results(self):
-        return [None]*self.start_len
+        self.args = args
+        self.kwargs = kwargs
+        self.set_data_count()
+        self.index = 0
+        self.received = 0
+        self.results = [None]*self.data_count
+        self.elapsed = [None]*self.data_count
 
-    def get_next_item(self):
-        if self.next_item_idx == self.start_len:
-            return None
-        item = self.data_items[self.next_item_idx]
-        self.next_item_idx += 1
-        return item
+    def set_data_count(self):
+        for arg in self.args:
+            if not hasattr(arg, '__iter__'):
+                continue
+            else:
+                self.data_count = len(arg)
+                break
+        if not hasattr(self, 'data_count'):
+            for key, value in self.kwargs.items():
+                if not hasattr(value, '__iter__'):
+                    continue
+                else:
+                    self.data_count = len(value)
+                    break
 
-class Reporter():
-    """Progress of execution as a progress bar"""
-    def __init__(self, header, init_progress=0.0):
-        self.timer = timer()
-        self.progress = init_progress
-        self.bar_fill = int(self.progress)
-
-        if options.reports_active:
-            print(header)
-            self.update = self.active_call
+    def get(self, arg, index):
+        if hasattr(arg, '__iter__'):
+            return arg[index]
         else:
-            self.update = self.inactive_call
+            return arg
 
-    def draw_bar(self):
-        print("|" + "\u25AE" * self.bar_fill + "-" * (100-self.bar_fill) + "|", end="")
+    def get_args(self, index):
+        return tuple((self.get(arg, index) for arg in self.args))
 
-    def print_progress(self):
-        print(": %.1f %%, : %.3f s" % (self.progress, self.timer.get_elapsed()), end="")
+    def get_kwargs(self, index):
+        return {key: self.get(value, index) for key, value in self.kwargs.items()}
 
-    def active_call(self, progress):
-        self.progress = progress
-        self.bar_fill = int(progress)
+    def next_items(self, n=None):
+        start = self.index
+        if n is None:
+            end = self.data_count
+        else:
+            end = min(self.index + n, self.data_count)
 
-        sys.stdout.write(u"\u001b[1000D")
-        self.draw_bar()
-        self.print_progress()
-        sys.stdout.flush()
+        for i in range(start, end):
+            yield self.get_args(self.index), self.get_kwargs(self.index), self.index
+            self.index += 1
 
-        if self.bar_fill == 100:
-            print()
+    def empty_results(self):
+        while self.received != self.data_count:
+            yield True
 
-    def inactive_call(self, progress):
+    def __len__(self):
+        return self.data_count
+
+    def put_result(self, result_data):
+        result, elapsed, index = result_data
+        self.results[index] = result
+        self.elapsed[index] = elapsed
+        self.received += 1
+
+#TODO: change for nd not just 2d
+class _2D_Product_queue():
+    def __init__(self, args):
+        self.args = args
+        self.shape = (len(args[0]), len(args[1]))
+        self.data_count = self.shape[0]*self.shape[1]
+        self.flat_index = 0
+        self.received = 0
+        self.results = [[None]*self.shape[1] for i in range(self.shape[0])]
+        self.elapsed = [[None]*self.shape[1] for i in range(self.shape[0])]
+
+    def flat_index_to_2D_index(self, flat_index):
+        index_0 = int(flat_index/self.shape[1])
+        index_1 = flat_index % self.shape[1]
+        return (index_0, index_1)
+
+    def get_current_index(self):
+        return self.current_flat_index
+
+    def next_items(self, n=None):
+        start = self.flat_index
+        if n is None:
+            end = self.data_count
+        else:
+            end = min(self.flat_index + n, self.data_count)
+
+        for i in range(start, end):
+            index = self.flat_index_to_2D_index(self.flat_index)
+            yield (self.args[0][index[0]], self.args[1][index[1]]), {}, index
+            self.flat_index += 1
+
+    def empty_results(self):
+        while self.received != self.data_count:
+            yield True
+
+    def __len__(self):
+        return self.data_count
+
+    def put_result(self, result_data):
+        result, elapsed, index = result_data
+        self.results[index[0]][index[1]] = result
+        self.elapsed[index[0]][index[1]] = elapsed
+        self.received += 1
+
+class Worker_killer():
+    def __init__(self):
         pass
+worker_killer = Worker_killer()
 
-def master(data=None, msg="msg-empty"):
+def master(queue):
     """
     This function dynamically saturates workers with data.
     It must be executed on master (global_rank=0) only.
@@ -133,67 +196,63 @@ def master(data=None, msg="msg-empty"):
     The function called worker must therefore be executed on
     all workes while this functin is being employed.
     """
-    reporter = Reporter(msg)
-    queued_data = queue(data)
-    all_results = queued_data.preallocate_results()
-
     if size == 1:
         print("Run with more cores -> 1 for master rest for the workers")
         return None
 
-    # saturating workers (initial spawn)
-    tag = 0
-    for i in range(1, size):
-        next = queued_data.get_next_item()
-        if next is None:
-            break
-        tag += 1
-        comm.send(next, dest=i, tag=tag)
+    # saturating workers
+    for i, data in enumerate(queue.next_items(n=size-1), 1):
+        comm.send(data, dest=i)
 
     # receiving results and keeping workers saturated (dynamic scheduling)
-    finished = 0
-    while 1:
-        next = queued_data.get_next_item()
-        if next is None:
-            break
-        result = comm.recv(None, source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
-        all_results[status.Get_tag() - 1] = result
-        finished += 1
-        reporter.update(100*finished/queued_data.start_len)
-        tag += 1
-        comm.send(next, dest=status.Get_source(), tag=tag)
+    for data in queue.next_items():
+        result_data = comm.recv(None, source=MPI.ANY_SOURCE, status=status)
+        queue.put_result(result_data)
+        comm.send(data, dest=status.Get_source())
 
-    # receiving last results
-    for i in range(1,min(size, queued_data.start_len+1)):
-        result = comm.recv(None, source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
-        all_results[status.Get_tag() - 1] = result
-        finished += 1
-        reporter.update(100*finished/queued_data.start_len)
+    # collect last results
+    for i in queue.empty_results():
+        result_data = comm.recv(None, source=MPI.ANY_SOURCE, status=status)
+        queue.put_result(result_data)
 
-    # sending termination signal of the worker loops
-    for i in range(1,size):
-        comm.send(None, dest=i, tag=0) # tag=0 kills breaks worker loop
-    return all_results
+    # sending termination signal to the workers
+    for i in range(1, size):
+        comm.send(worker_killer, dest=i) # tag=0 breaks worker loop
 
-def worker(work=None):
+    return queue.results, queue.elapsed
+
+def worker(work):
     """This function waits for data from master, executes work on them,
     send result to master and waits for another instruction from master.
-    tag = 0 breaks out of this loop.
+    Worker_killer instance breaks out of this loop.
     """
-    while 1:
-        data = comm.recv(None, source=0, tag=MPI.ANY_TAG, status=status)
-        tag = status.Get_tag()
-        if not tag:
+    while True:
+        data = comm.recv(None, source=0)
+        if isinstance(data, Worker_killer):
             break
-        comm.send(work(data), dest=0, tag=tag)
+        timer = Timer()
+        args, kwargs, index = data
+        result = work(*args, **kwargs)
+        elapsed = timer.get_elapsed()
+        comm.send((result, elapsed, index), dest=0)
 
-def map(work, data):
-    """Order preserving scheduling of work with data as argument
-       (basically order preserving parallel for loop)"""
+def sequential_map(work, *args, **kwargs):
+    """Order preserving scheduling of work with data as argument"""
     if global_rank == 0:
-        return master(data, msg="Dynamic mapping: " + work.__name__)
+        queue = Sequential_queue(args, kwargs)
+        return master(queue)
     else:
         worker(work)
+        return None, None
+
+def _2d_product_map(work, *args):
+    """Order preserving scheduling of work with data as argument"""
+    if global_rank == 0:
+        queue = _2D_Product_queue(args)
+        return master(queue)
+    else:
+        worker(work)
+        return None, None
 
 def broadcast(object, root=0):
     """Broadcast by assignment."""

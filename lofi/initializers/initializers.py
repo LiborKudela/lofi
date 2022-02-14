@@ -1,26 +1,10 @@
-from numpy import random, inf
+import numpy as np
 
-class uniform():
-    def __init__(self, low=-0.1, high=0.1):
-        self.low = low
-        self.high = high
+def constant(value=0.0, shape=None):
+    return np.full(shape, value)
 
-    def initialize(self,M):
-        M.p[:] = random.uniform(self.low, self.high, M.m)
-        M.y = inf
+def normal(mean=0.0, std=1.0, shape=None):
+    return np.random.normal(loc=mean, scale=std, size=shape)
 
-class normal():
-    def __init__(self, mean=0.0, std=0.1):
-        self.mean = mean
-        self.std = std
-
-    def initialize(self,M):
-        M.p[:] = random.normal(self.mean, self.std, M.m)
-        M.y = inf
-
-class om_override_file():
-    def __init__(self, path):
-        self.path = path
-
-    def initialize(self, M):
-        M.p[:] = self.p
+def uniform(low=0.0, up=1.0, shape=None):
+    return np.uniform(low=lb, high=up, size=shape)

@@ -2,6 +2,7 @@ from .cluster import cluster
 from . import APIs
 from . import optimizers
 from . import visualizers
+from . import initializers
 from time import sleep
 
 # lofi has interactive mode that can be call using lofi.imode(globals())

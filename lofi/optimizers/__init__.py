@@ -1,7 +1,17 @@
-# particle swarm family
-from .PSO import PSO        # standard PSO 
-from .GRAPSO import GRAPSO    # Greedy random adaptation PSO 
+# standard PSO with constant momentum weight 
+from .PSO import PSO
 
-# evolution strategies family
-from .OPLES import OPLES    # 1+lambda evolutionary strategy with momentum
-# from .SGD_ES import SGD_ES  # SG mimicking evolutionary strategy (experimental)
+# Greedy random adaptation PSO 
+from .GRAPSO import GRAPSO
+
+# Basic evolution strategy estimated gradient descend (antithetic samples)
+from .VanillaES import VanillaES
+
+# RMSProp but the gradient is estimated by Vanilla ES
+from .RMSPropES import RMSPropES
+
+# 1+lambda evolutionary strategy with momentum
+from .OPLES import OPLES
+
+# Vanilla random search steping to best sample
+from .RS import RS

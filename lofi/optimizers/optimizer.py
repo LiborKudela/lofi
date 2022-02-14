@@ -4,13 +4,11 @@ import time
 
 class Options():
     def __init__(self):
-        self.max_iter = 0            # maximum number of iterations
         self.max_error = -np.inf     # maximum allowed error
         self.limit_space = True      # optional coordinate bound control
         self.sparse_program = False  # optional regularization for sparsity
         self.sparsity_weight = 1.0   # weight to penalize density of program
         self.active_callback = True  # activates reports to terminal
-        self.dynamic = True          # temporary experimental implementation 
 
 class Optimizer():
     def __init__(self, M=None, options=Options):
@@ -28,7 +26,7 @@ class Optimizer():
 
     def restart(self):
         self.terminate = False  # termination condition state
-        self.epoch_time = 0.0   # time elapsed during last epoch
+        self.step_time = 0.0   # time elapsed during last epoch
         self.total_time = 0.0   # total elapsed time during training
         self.iter = 0
         self.options.max_iter = 0
@@ -44,58 +42,40 @@ class Optimizer():
     def initialize_parameter_array(self):
         if cluster.global_rank == 0:
             shape = self.p.shape
-            if self.options.dynamic:
-                self.p_array = np.zeros((shape[0] + 1, shape[1]))
-            else:
-                self.p_array = np.zeros(shape)
+            self.p_array = np.zeros((shape[0] + 1, shape[1]))
         else:
             self.p_array = None
 
     @cluster.on_master
     def fill_parameter_array(self):
-        if self.options.dynamic:
-            self.p_array[:-1] = self.p  # add new population of the method
-            self.p_array[-1] = self.M.p # add current gbest (loss can be dynamic)
+        self.p_array[:-1] = self.p  # add new population of the method
+        self.p_array[-1] = self.M.p # add current gbest (loss can be dynamic)
+
+    def evaluate_samples(self, x=None):
+        if x is None:
+            data = cluster.sequential_map(self.M.eval_loss, self.p_array)
         else:
-            self.p_array = self.p
+            data = cluster._2d_product_map(self.M.eval_loss, self.p_array, x)
+        self.results, _ = cluster.sequential_map(self.M.loss, data[0])
+
+        if cluster.global_rank == 0:
+            self.mean_sim_cpu_time = np.mean(np.array(data[1]))
+            self.M.y = self.results[-1]
+            self.y[:] = np.array(self.results[:-1])
+
+            # count succesfully completed evaluations
+            total = len(self.y)
+            self.failed = np.count_nonzero(self.y == np.inf)
+            self.survived = total - self.failed
 
     @cluster.on_master
-    def resolve_gbest_result(self):
-        if self.options.dynamic:
-            self.M.y = self.results[-1][0]
+    def resolve_map_elapsed(self,):
+        self.mean_sim_cpu_time = np.mean(np.array(self.elapsed))
 
     @cluster.on_master
-    def extract_results(self):
-        # mutate r into an array so each value type corresponds to a single row
-        # r[0,:]=losses, r[1,:]=densities, r[2,:]=return codes, r[3,:]=sim. elapsed times
-        if self.options.dynamic:
-            r = np.array(self.results[:-1]).transpose()
-        else:
-            r = np.array(self.results).transpose()
-        total = r.shape[1]
-
-        # read results by type (rows)
-        self.y[:] = r[0,:]
-        if self.options.sparse_program:
-            self.y += r[1,:]
-        self.failed = np.count_nonzero(r[2,:])
-        self.survived = total - self.failed
-        self.mean_sim_cpu_time = np.sum(r[3,:])/total
-        self.result_owner = r[4,:]
-
-    @cluster.on_master
-    def pre_gbest_update_actions(self):
-        """This function is called prior to gbest_update"""
+    def update_model(self):
+        """This method calculates and assigns newest model parameters"""
         pass
-
-    @cluster.on_master
-    def update_gbest(self):
-        best_idx = np.nanargmin(self.y)
-        if self.M.y > self.y[best_idx]:
-            self.M.update_state(self.p[best_idx,:],
-                                self.y[best_idx],
-                                owner=self.result_owner[best_idx],
-                                res_id=best_idx+1) 
 
     def update_log(self):
         self.M.update_log()
@@ -110,66 +90,39 @@ class Optimizer():
         self.iter += 1
 
     @cluster.on_master
-    def check_termination(self):
-        self.terminate = any([
-            self.iter >= self.options.max_iter,
-            self.M.y <= self.options.max_error])
-
-    def update_termination(self):
-        self.check_termination()
-        self.terminate = cluster.broadcast(self.terminate)
-
-    @cluster.on_master
     def generate_new_epoch_data(self):
-        """This method that assigns new self.p etc."""
-        pass
-
-    @cluster.on_master
-    def adaptation(self):
-        """This method performs an adaptation procedure"""
+        """This method that assigns new self.p to be evaluated."""
         pass
 
     @cluster.on_master
     def update_console_table(self):
        tbl = f"""
 \033[K+===========================================+
-\033[KAlgorithm: {self.name}
-\033[KModel    : {self.M.model}
-\033[KLoss     : {self.M.y:.6f}
-\033[KEpoch    : {self.iter:d}
-\033[KEvals    : {self.M.total_evals:d}
-\033[KOpt Time : {self.total_time:.4f}
-\033[KAvg time : {self.mean_sim_cpu_time:.4f}
-\033[KSuccess  : {self.survived:d}
-\033[KFailure  : {self.failed:d}
+\033[KAlgorithm : {self.__class__.__name__}
+\033[KModel     : {self.M.model}
+\033[KLoss      : {self.M.y:.6f}
+\033[KEpoch     : {self.iter:d}
+\033[KEvals     : {self.M.total_evals:d}
+\033[KStep Time : {self.step_time:.4f}
+\033[KOpt Time  : {self.total_time:.4f}
+\033[KAvg time  : {self.mean_sim_cpu_time:.4f}
+\033[KSuccess   : {self.survived:d}
+\033[KFailure   : {self.failed:d}
 \033[K+===========================================+
 """
-       print(tbl, end = "\n" if self.terminate else "\033[F"*tbl.count("\n"))
+       print(tbl)
 
-    def next_epoch(self):
-        epoch_timer = cluster.timer()
-        self.fill_parameter_array()
-        self.results = cluster.map(self.M.loss, self.p_array)
-        self.resolve_gbest_result()
-        self.extract_results()
-        self.pre_gbest_update_actions()
-        self.update_gbest()
-        self.adaptation()
-        self.generate_new_epoch_data()
-        self.enforce_bounds_on_samples()
-        self.update_iteration_counter()
-        self.update_termination()
-        self.epoch_time = epoch_timer.get_elapsed()
-        self.total_time += self.epoch_time
-        self.update_log()
-        self.update_console_table()
+    def step(self, x=None, n=1):
+        for i in range(n):
+            step_timer = cluster.Timer()
+            self.generate_new_samples()
+            self.enforce_bounds_on_samples()
+            self.fill_parameter_array()
+            self.evaluate_samples(x)
+            self.update_model()
 
-    @cluster.on_master
-    def add_to_max_iter(self, number):
-        self.options.max_iter += number
-
-    def train(self, epochs=100):
-        self.add_to_max_iter(epochs)
-        self.update_termination()
-        while not self.terminate:
-            self.next_epoch()
+            self.update_iteration_counter()
+            self.update_log()
+            self.update_console_table()
+            self.step_time = step_timer.get_elapsed()
+            self.total_time += self.step_time
