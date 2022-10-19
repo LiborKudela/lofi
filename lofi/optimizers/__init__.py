@@ -10,8 +10,5 @@ from .VanillaES import VanillaES
 # RMSProp but the gradient is estimated by Vanilla ES
 from .RMSPropES import RMSPropES
 
-# 1+lambda evolutionary strategy with momentum
-from .OPLES import OPLES
-
 # Vanilla random search steping to best sample
 from .RS import RS

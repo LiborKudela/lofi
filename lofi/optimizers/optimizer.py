@@ -2,18 +2,14 @@ import numpy as np
 from ..cluster import cluster
 import time
 
-class Options():
-    def __init__(self):
-        self.max_error = -np.inf     # maximum allowed error
-        self.limit_space = True      # optional coordinate bound control
-        self.sparse_program = False  # optional regularization for sparsity
-        self.sparsity_weight = 1.0   # weight to penalize density of program
-        self.active_callback = True  # activates reports to terminal
-
 class Optimizer():
-    def __init__(self, M=None, options=Options):
-        self.p = None  # this is necessary for cluster.map call
-        self.options = options()
+    def __init__(self, M=None, bound_control=True, sparse=False, 
+                 sparsity_weight=1.0):
+                 
+        self.p = None                       # necessary for cluster.map call
+        self.bound_control = bound_control  # optional coordinate bound control
+        self.sparse = sparse                # optional regularization for sparsity
+        self.sparse_w = sparsity_weight     # weight of parameter density in loss
         if M is not None:
             self.connect_model(M)
             self.restart()
@@ -29,7 +25,6 @@ class Optimizer():
         self.step_time = 0.0   # time elapsed during last epoch
         self.total_time = 0.0   # total elapsed time during training
         self.iter = 0
-        self.options.max_iter = 0
         self.initialize_state()
         self.initialize_parameter_array()
         self.results = []
@@ -40,6 +35,7 @@ class Optimizer():
         pass
 
     def initialize_parameter_array(self):
+        """Adds current solution to be re-evaluated for dynamic models"""
         if cluster.global_rank == 0:
             shape = self.p.shape
             self.p_array = np.zeros((shape[0] + 1, shape[1]))
@@ -82,7 +78,7 @@ class Optimizer():
 
     @cluster.on_master
     def enforce_bounds_on_samples(self):
-        if self.options.limit_space:
+        if self.bound_control:
             np.clip(self.p, self.M.p_lb, self.M.p_ub, out=self.p)
 
     @cluster.on_master

@@ -3,8 +3,8 @@ import lofi
 API = lofi.APIs.open_modelica
 model = API('AdvectionScheme.mo','AdvectionScheme')
 
-model.visual_callback.skip = 25
 opt = lofi.optimizers.GRAPSO(model)
-opt.train(200)
+for i in range(200):
+    opt.step()
 
 lofi.imode(globals())
