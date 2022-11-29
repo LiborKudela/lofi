@@ -9,10 +9,18 @@
 python3 -m pip install git+https://github.com/LiborKudela/lofi.git
 
 
-**It has APIs to:**
+**How to run examples:**  
+Start up terminal and Navigate to /examples directory.  
+Then run command: ```mpirun -n 4 python3 py_function_example.py```
+
+**Available Interfaces:**
 * OpenModelica
+* Python functions
 
 **Optimizers:**
-* PSO
-* GRAPSO
-* OPLES (An evolutionary strategy with samling space adaptation)
+* PSO (Particle swarm optimizer)
+* GRAPSO (Greedy random adaptation particle swarm optimizer)
+* RMSPropES (Gradientless version of RMSProp gradient descent)
+* RS (Random search)
+* VanilaES (Gradientless descend where grad is aproximated very roughly)
+* More algorithms maybe in the future
